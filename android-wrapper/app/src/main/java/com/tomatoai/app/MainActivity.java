@@ -4,9 +4,12 @@ import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.os.Bundle;
 import android.webkit.WebChromeClient;
+import android.webkit.WebResourceError;
+import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.widget.Toast;
 
 /**
  * 番茄AI · WebView 壳
@@ -32,7 +35,18 @@ public class MainActivity extends Activity {
         s.setUserAgentString(s.getUserAgentString() + " TomatoAI/0.1.0");
         s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
 
-        webView.setWebViewClient(new WebViewClient());
+        webView.setWebViewClient(new WebViewClient() {
+            @Override
+            public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
+                super.onReceivedError(view, request, error);
+                // 仅主框架加载失败时提示（子资源错误不打扰）：便于测试时定位问题
+                if (request.isForMainFrame()) {
+                    String msg = "加载失败: " + error.getDescription() + " (code=" + error.getErrorCode() + ")";
+                    android.util.Log.e("TomatoAI", msg);
+                    Toast.makeText(MainActivity.this, msg, Toast.LENGTH_LONG).show();
+                }
+            }
+        });
         webView.setWebChromeClient(new WebChromeClient());
 
         // appassets 专用源：提供独立 origin，数据持久化正常
