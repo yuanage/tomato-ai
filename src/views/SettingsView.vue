@@ -67,6 +67,11 @@
           将删除全部任务和番茄记录，且无法恢复，确定吗？
         </n-popconfirm>
       </div>
+      <div class="field">
+        <div class="field-label">错误日志</div>
+        <n-button quaternary @click="handleExportLogs">导出错误日志</n-button>
+        <div class="field-hint">测试期问题定位用；运行时错误自动记录在本地</div>
+      </div>
     </n-card>
 
     <p class="about">番茄AI v0.1.0 · 数据仅存本地 · 零广告零社交</p>
@@ -81,6 +86,7 @@ import { getAIConfig, saveAIConfig } from '../api/config'
 import { chatJSON } from '../api/ai'
 import { clearAllTasks } from '../composables/useTasks'
 import { clearPomodoroRecords } from '../utils/storage'
+import { getLogs } from '../utils/logger'
 
 const message = useMessage()
 const { settings, ensureLoaded, updateSettings } = useSettings()
@@ -150,6 +156,29 @@ async function clearAll() {
   await clearAllTasks()
   await clearPomodoroRecords()
   message.success('本地数据已清空')
+}
+
+/** 导出错误日志（下载 JSON 文件，测试问题定位用） */
+async function handleExportLogs() {
+  try {
+    const logs = await getLogs()
+    if (!logs.length) {
+      message.info('暂无错误日志')
+      return
+    }
+    const blob = new Blob([JSON.stringify(logs, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `番茄AI-错误日志-${new Date().toISOString().slice(0, 10)}.json`
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(url)
+    message.success(`已导出 ${logs.length} 条错误日志`)
+  } catch (e) {
+    message.error('导出失败：' + (e.message || '未知错误'))
+  }
 }
 </script>
 

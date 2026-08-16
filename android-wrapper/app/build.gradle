@@ -1,0 +1,44 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.tomatoai.app'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "com.tomatoai.app"
+        minSdk 24          // Android 7.0+，覆盖主流机型
+        targetSdk 34
+        versionCode 1
+        versionName "0.1.0"
+    }
+
+    // 签名配置：本地生成的 release keystore（仅用于测试分发）
+    signingConfigs {
+        release {
+            storeFile file('../../.build/keystore/tomatoai-release.jks')
+            storePassword 'tomatoai2026'
+            keyAlias 'tomatoai'
+            keyPassword 'tomatoai2026'
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.release
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    // 测试分发包跳过 lint 阻塞，加快构建
+    lint {
+        checkReleaseBuilds false
+        abortOnError false
+    }
+}

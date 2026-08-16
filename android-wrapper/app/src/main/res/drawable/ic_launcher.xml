@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 番茄图标：红底 + 白色番茄轮廓（矢量，零图片资源） -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#D03050"
+        android:pathData="M54,54m-52,0a52,52 0,1 1,104 0a52,52 0,1 1,-104 0" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,30c-13,0 -22,9 -22,20c0,4 1,7 3,10c-2,2 -4,5 -4,9c0,7 10,11 23,11s23,-4 23,-11c0,-4 -2,-7 -4,-9c2,-3 3,-6 3,-10c0,-11 -9,-20 -22,-20z" />
+    <path
+        android:fillColor="#2E7D32"
+        android:pathData="M54,30c-4,-8 2,-14 8,-16c-2,6 0,10 4,12c-4,2 -8,4 -12,4z" />
+</vector>

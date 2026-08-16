@@ -1,0 +1,4 @@
+// 番茄AI 安卓 WebView 壳工程
+plugins {
+    id 'com.android.application' version '8.4.2' apply false
+}

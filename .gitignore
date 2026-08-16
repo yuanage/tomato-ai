@@ -5,6 +5,11 @@ dist
 .DS_Store
 # 安全扫描插件审计日志（工具生成，不入库）
 .mimosa
+# 本地构建工具链与安卓工程产物
+.build
+android-wrapper/.gradle
+android-wrapper/app/build
+android-wrapper/build
 # unplugin 自动生成的类型声明文件（首次 dev/build 时自动重新生成）
 src/auto-imports.d.ts
 src/components.d.ts
