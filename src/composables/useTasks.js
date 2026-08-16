@@ -2,22 +2,18 @@ import { ref, computed } from 'vue'
 import { genId, getTasks, saveTasks } from '../utils/storage'
 
 /**
- * 任务清单（模块级单例）
+ * 任务清单（模块级单例）—— 回退到路线A之前的形态
  *
  * 设计：
- * 1. 单例：任务状态全局共享，任务页、AI 导入页（阶段6）读写同一份数据；
- * 2. 所有写操作都先改内存再落库（IndexedDB 一次写整表，本应用数据量小，足够）；
- * 3. 排序规则：置顶（pinnedAt 新→旧）→ 未完成（createdAt 新→旧）→ 已完成（completedAt 新→旧）。
+ * 1. 单例：任务状态全局共享；
+ * 2. 所有写操作先改内存再落库（IndexedDB 一次写整表）；
+ * 3. 排序：置顶（pinnedAt 新→旧）→ 未完成（createdAt 新→旧）→ 已完成（completedAt 新→旧）。
  */
 
 const tasks = ref([])
 let loadPromise = null
 
-/**
- * 确保任务数据已加载【修复：共享 Promise，防并发重复加载】
- * 并发调用只发起一次 IndexedDB 读取；避免"后完成的读取用旧数据覆盖内存中已修改数据"
- * 导致绑定任务计数等内存修改丢失。读取失败时重置，允许下次重试。
- */
+/** 确保任务数据已加载（共享 Promise：并发调用只读一次库，避免旧数据覆盖内存修改） */
 function ensureLoaded() {
   if (!loadPromise) {
     loadPromise = getTasks()
@@ -46,7 +42,6 @@ export async function addTask(title, estPomodoros = null) {
     pinned: false,
     pinnedAt: null,
     estPomodoros: estPomodoros || null,
-    consumedPomodoros: 0, // 已消耗番茄数（完成绑定的番茄时累加）
     createdAt: Date.now(),
     completedAt: null
   }
@@ -55,30 +50,7 @@ export async function addTask(title, estPomodoros = null) {
   return task
 }
 
-/** 任务已消耗番茄数累加（绑定任务完成一个番茄时调用） */
-export async function incrementTaskPomodoros(id, n = 1) {
-  await ensureLoaded()
-  const t = tasks.value.find((x) => x.id === id)
-  if (!t) return
-  t.consumedPomodoros = (t.consumedPomodoros || 0) + n
-  await persist()
-}
-
-/**
- * AI 导入去重（纯函数）：按标题（去空格）过滤掉与现有任务重复的项，
- * 同时过滤空标题；保持原始顺序。
- */
-export function dedupeByTitle(existingTitles, incoming) {
-  const seen = new Set(existingTitles.map((t) => String(t || '').trim()))
-  return incoming.filter((item) => {
-    const title = String(item.title || '').trim()
-    if (!title || seen.has(title)) return false
-    seen.add(title)
-    return true
-  })
-}
-
-/** 切换完成状态（勾选时记录 completedAt，取消勾选时清空） */
+/** 切换完成状态 */
 export async function toggleDone(id) {
   await ensureLoaded()
   const t = tasks.value.find((x) => x.id === id)
@@ -98,7 +70,7 @@ export async function togglePin(id) {
   await persist()
 }
 
-/** 局部更新任务（编辑标题、预估番茄数等） */
+/** 局部更新任务 */
 export async function updateTask(id, patch) {
   await ensureLoaded()
   const t = tasks.value.find((x) => x.id === id)
@@ -121,14 +93,8 @@ export async function clearAllTasks() {
   await saveTasks([])
 }
 
-/** 从存储重新加载任务（导入备份后调用；重置共享加载 Promise 强制重新读取） */
-export async function reloadTasks() {
-  loadPromise = null
-  await ensureLoaded()
-}
-
 /**
- * 任务排序纯函数（独立导出便于测试）：
+ * 任务排序纯函数：
  * 置顶（pinnedAt 新→旧）→ 未完成（createdAt 新→旧）→ 已完成（completedAt 新→旧）
  */
 export function sortTasks(list) {
@@ -146,5 +112,15 @@ export function sortTasks(list) {
 const sortedTasks = computed(() => sortTasks(tasks.value))
 
 export function useTasks() {
-  return { tasks, sortedTasks, ensureLoaded, addTask, toggleDone, togglePin, updateTask, removeTask }
+  return {
+    tasks,
+    sortedTasks,
+    ensureLoaded,
+    addTask,
+    toggleDone,
+    togglePin,
+    updateTask,
+    removeTask,
+    clearAllTasks
+  }
 }

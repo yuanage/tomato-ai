@@ -13,7 +13,6 @@
           :stroke-width="strokeWidth"
           :stroke-dasharray="circumference"
           :stroke-dashoffset="offset"
-          :style="{ stroke: color }"
         />
       </g>
     </svg>
@@ -30,9 +29,7 @@ const props = defineProps({
   /** 剩余进度 0~1 */
   progress: { type: Number, default: 0 },
   size: { type: Number, default: 260 },
-  strokeWidth: { type: Number, default: 6 },
-  /** 进度环颜色（专注=番茄红，休息=绿） */
-  color: { type: String, default: '#d03050' }
+  strokeWidth: { type: Number, default: 6 }
 })
 
 const R = 45

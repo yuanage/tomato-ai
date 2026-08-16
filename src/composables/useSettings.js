@@ -2,22 +2,14 @@ import { ref } from 'vue'
 import { getSettings, saveSettings as persistSettings } from '../utils/storage'
 
 /**
- * 应用设置（模块级单例）
+ * 应用设置（模块级单例）—— 回退到路线A之前的形态
  * 设置页读写、计时器页订阅，共用同一份响应式状态。
  */
 
-const settings = ref({
-  pomodoroMinutes: 25,
-  shortBreakMinutes: 5,
-  longBreakMinutes: 15,
-  longBreakEvery: 4,
-  vibrateOnComplete: true,
-  notifyOnComplete: true,
-  soundOnComplete: true
-})
+const settings = ref({ pomodoroMinutes: 25, vibrateOnComplete: true })
 let loadPromise = null
 
-/** 确保设置已加载【修复：共享 Promise，防并发重复加载覆盖内存修改】 */
+/** 确保设置已加载（共享 Promise：并发调用只读一次库） */
 function ensureLoaded() {
   if (!loadPromise) {
     loadPromise = getSettings()
@@ -39,12 +31,6 @@ async function updateSettings(patch) {
   await persistSettings(patch)
 }
 
-/** 从存储重新加载设置（导入备份后调用；重置共享加载 Promise 强制重新读取） */
-async function reloadSettings() {
-  loadPromise = null
-  await ensureLoaded()
-}
-
 export function useSettings() {
-  return { settings, ensureLoaded, updateSettings, reloadSettings }
+  return { settings, ensureLoaded, updateSettings }
 }

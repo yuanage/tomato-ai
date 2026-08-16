@@ -3,9 +3,6 @@ import { getPomodoroRecords } from '../utils/storage'
 import { useTasks } from './useTasks'
 import { startOfDay, startOfWeek, isSameDay, weekdayLabel } from '../utils/date'
 
-// 复用任务单例（只读其状态）
-const { tasks: tasksRef, ensureLoaded: ensureTasksLoaded } = useTasks()
-
 /**
  * 统计聚合（页面级，不做全局单例）：
  * 每次进入统计页 load() 重新读取 IndexedDB，保证数据最新。
@@ -23,6 +20,9 @@ async function load() {
     loading.value = false
   }
 }
+
+// 复用任务单例（只读其状态）
+const { tasks: tasksRef, ensureLoaded: ensureTasksLoaded } = useTasks()
 
 function sumMinutes(list) {
   return Math.round(list.reduce((sum, r) => sum + (r.durationSec || 0), 0) / 60)
@@ -44,9 +44,6 @@ const week = computed(() => {
 
 /** 累计番茄数 */
 const total = computed(() => records.value.length)
-
-/** 累计专注分钟数 */
-const totalMinutes = computed(() => sumMinutes(records.value))
 
 /** 近 7 天每日番茄数（用于柱状图） */
 const last7Days = computed(() => {
@@ -76,5 +73,5 @@ const taskStats = computed(() => {
 })
 
 export function useStats() {
-  return { loading, today, week, total, totalMinutes, last7Days, taskStats, load }
+  return { loading, today, week, total, last7Days, taskStats, load }
 }

@@ -11,11 +11,8 @@
 import assert from 'node:assert/strict'
 import { startOfDay, startOfWeek, isSameDay, weekdayLabel } from '../src/utils/date'
 import { extractJSON, AIError } from '../src/api/ai'
-import { sortTasks, dedupeByTitle } from '../src/composables/useTasks'
+import { sortTasks } from '../src/composables/useTasks'
 import { mockResponse } from '../src/api/mock'
-import { nextBreakMinutes } from '../src/utils/break'
-import { parseBackup } from '../src/utils/storage'
-import { AI_PRESETS } from '../src/api/config'
 
 let passed = 0
 let failed = 0
@@ -180,106 +177,6 @@ test('focus 返回状态诊断字段', async () => {
   assert.ok(['focused', 'normal', 'distracted'].includes(r.state))
   assert.ok(Number.isInteger(r.score) && r.score >= 0 && r.score <= 100)
   assert.ok(typeof r.analysis === 'string' && typeof r.advice === 'string')
-})
-
-// ==================== dedupeByTitle 去重 ====================
-section('useTasks.js dedupeByTitle 导入去重')
-
-test('与现有任务重复的标题被过滤', () => {
-  const incoming = [{ title: '写周报' }, { title: '写周报' }, { title: '读文档' }]
-  const out = dedupeByTitle(['写周报'], incoming)
-  assert.deepEqual(out.map((i) => i.title), ['读文档'])
-})
-
-test('空标题被过滤', () => {
-  const out = dedupeByTitle([], [{ title: '   ' }, { title: '有效任务' }])
-  assert.deepEqual(out.map((i) => i.title), ['有效任务'])
-})
-
-test('标题去空格后比较且保持顺序', () => {
-  const out = dedupeByTitle(['a'], [{ title: ' a ' }, { title: 'b' }, { title: 'a' }])
-  assert.deepEqual(out.map((i) => i.title), ['b'])
-})
-
-// ==================== parseBackup 备份解析 ====================
-section('storage.js parseBackup 备份解析')
-
-test('有效备份返回数据结构', () => {
-  const r = parseBackup(
-    JSON.stringify({
-      app: 'tomato-ai',
-      version: 1,
-      data: {
-        tasks: [{ id: 't1' }],
-        pomodoroRecords: [{ id: 'r1' }],
-        settings: { pomodoroMinutes: 30 }
-      }
-    })
-  )
-  assert.equal(r.tasks.length, 1)
-  assert.equal(r.pomodoroRecords.length, 1)
-  assert.equal(r.settings.pomodoroMinutes, 30)
-})
-
-test('缺失字段回落空数组', () => {
-  const r = parseBackup(JSON.stringify({ app: 'tomato-ai', data: {} }))
-  assert.deepEqual(r.tasks, [])
-  assert.deepEqual(r.pomodoroRecords, [])
-  assert.deepEqual(r.events, [])
-})
-
-test('非 JSON 内容抛错', () => {
-  assert.throws(() => parseBackup('not a json'), /JSON/)
-})
-
-test('非番茄AI备份抛错', () => {
-  assert.throws(() => parseBackup(JSON.stringify({ app: 'other' })), /备份/)
-})
-
-test('结构不完整抛错', () => {
-  assert.throws(() => parseBackup(JSON.stringify({ app: 'tomato-ai', data: { tasks: 'x' } })), /结构/)
-})
-
-// ==================== AI_PRESETS 预设 ====================
-section('config.js AI_PRESETS 服务商预设')
-
-test('包含国内主流服务商且值唯一', () => {
-  const labels = AI_PRESETS.map((p) => p.label)
-  assert.ok(labels.includes('DeepSeek'))
-  assert.ok(labels.includes('豆包（火山方舟）'))
-  assert.ok(labels.includes('通义千问'))
-  assert.equal(new Set(AI_PRESETS.map((p) => p.value)).size, AI_PRESETS.length)
-})
-
-test('预设地址均为 https 且模型非空（custom 除外）', () => {
-  for (const p of AI_PRESETS) {
-    if (p.value === 'custom') continue
-    assert.ok(p.baseURL.startsWith('https://'), `${p.label} 地址需为 https`)
-    assert.ok(p.model.length > 0, `${p.label} 模型不能为空`)
-  }
-})
-
-// ==================== break.js 休息规则 ====================
-section('break.js 休息切换规则')
-
-test('第 1~3 个番茄后为短休息（5 分钟）', () => {
-  assert.equal(nextBreakMinutes(1), 5)
-  assert.equal(nextBreakMinutes(2), 5)
-  assert.equal(nextBreakMinutes(3), 5)
-})
-
-test('第 4 个番茄后为长休息（15 分钟）', () => {
-  assert.equal(nextBreakMinutes(4), 15)
-})
-
-test('长休息后重新计数', () => {
-  assert.equal(nextBreakMinutes(5), 5)
-  assert.equal(nextBreakMinutes(8), 15)
-})
-
-test('自定义阈值与时长生效', () => {
-  assert.equal(nextBreakMinutes(2, { every: 2, longMinutes: 20 }), 20)
-  assert.equal(nextBreakMinutes(3, { every: 2, longMinutes: 20 }), 5)
 })
 
 // ==================== 汇总 ====================

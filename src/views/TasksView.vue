@@ -11,11 +11,6 @@
       <n-button type="primary" :disabled="!draftTitle.trim()" @click="handleAdd">添加</n-button>
     </div>
 
-    <!-- 进行中 / 已完成概览 -->
-    <div v-if="tasks.length" class="list-summary">
-      进行中 {{ activeCount }} · 已完成 {{ doneCount }}
-    </div>
-
     <!-- 空态 -->
     <n-empty
       v-if="tasks.length === 0"
@@ -36,9 +31,7 @@
           @update:checked="() => handleToggleDone(task.id)"
         />
         <span class="task-title">{{ task.title }}</span>
-        <span v-if="task.estPomodoros" class="task-est">
-          🍅{{ task.consumedPomodoros ?? 0 }}/{{ task.estPomodoros }}
-        </span>
+        <span v-if="task.estPomodoros" class="task-est">🍅{{ task.estPomodoros }}</span>
 
         <div class="task-actions">
           <n-button
@@ -82,13 +75,6 @@
           placeholder="预估番茄数（可选）"
           style="width: 100%"
         />
-        <n-input-number
-          v-model:value="editConsumed"
-          :min="0"
-          :max="999"
-          placeholder="已消耗番茄数（修正用）"
-          style="width: 100%"
-        />
         <div class="edit-actions">
           <n-button @click="editModalShow = false">取消</n-button>
           <n-button type="primary" :disabled="!editTitle.trim()" @click="handleSaveEdit">
@@ -101,7 +87,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useMessage } from 'naive-ui'
 import { useTasks } from '../composables/useTasks'
 
@@ -140,27 +126,18 @@ const editModalShow = ref(false)
 const editingId = ref(null)
 const editTitle = ref('')
 const editEst = ref(null)
-const editConsumed = ref(0)
-
-const activeCount = computed(() => tasks.value.filter((t) => !t.done).length)
-const doneCount = computed(() => tasks.value.filter((t) => t.done).length)
 
 function openEdit(task) {
   editingId.value = task.id
   editTitle.value = task.title
   editEst.value = task.estPomodoros ?? null
-  editConsumed.value = task.consumedPomodoros ?? 0
   editModalShow.value = true
 }
 
 async function handleSaveEdit() {
   const title = editTitle.value.trim()
   if (!title) return
-  await updateTask(editingId.value, {
-    title,
-    estPomodoros: editEst.value || null,
-    consumedPomodoros: editConsumed.value || 0
-  })
+  await updateTask(editingId.value, { title, estPomodoros: editEst.value || null })
   editModalShow.value = false
   message.success('已保存')
 }
@@ -176,14 +153,6 @@ async function handleSaveEdit() {
 .add-row {
   display: flex;
   gap: 10px;
-}
-
-/* 列表概览：进行中/已完成计数 */
-.list-summary {
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--text-tertiary);
-  letter-spacing: 0.3px;
 }
 
 .task-list {

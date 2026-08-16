@@ -20,7 +20,7 @@
         <div class="stat-card">
           <div class="stat-label">累计番茄</div>
           <div class="stat-num">{{ total }}</div>
-          <div class="stat-sub">累计专注 {{ totalMinutes }} 分钟</div>
+          <div class="stat-sub">全部记录在本地</div>
         </div>
 
         <!-- 任务完成率 -->
@@ -45,9 +45,6 @@
             <div class="bar-label" :class="{ today: i === last7Days.length - 1 }">{{ d.label }}</div>
           </div>
         </div>
-        <p v-if="total === 0" class="chart-empty">
-          还没有番茄记录——完成第一个番茄后，这里会显示近 7 天数据
-        </p>
       </div>
     </n-spin>
   </div>
@@ -57,7 +54,7 @@
 import { onMounted, onUnmounted } from 'vue'
 import { useStats } from '../composables/useStats'
 
-const { loading, today, week, total, totalMinutes, last7Days, taskStats, load } = useStats()
+const { loading, today, week, total, last7Days, taskStats, load } = useStats()
 
 onMounted(() => {
   load()
@@ -165,7 +162,6 @@ function barHeight(count) {
   border-radius: 6px 6px 0 0;
   opacity: 0.4;
   min-height: 4px;
-  transition: opacity 0.2s ease;
 }
 
 .bar.today {
@@ -186,12 +182,5 @@ function barHeight(count) {
 .bar-label.today {
   color: var(--primary);
   font-weight: 500;
-}
-
-.chart-empty {
-  font-size: 12px;
-  color: var(--text-tertiary);
-  text-align: center;
-  margin: 10px 0 0;
 }
 </style>

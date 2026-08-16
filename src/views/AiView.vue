@@ -48,26 +48,10 @@
 
           <div v-if="sched.result" class="result">
             <p class="tip">{{ sched.result.tip }}</p>
-            <!-- 排程时间轴可视化 -->
-            <div class="timeline">
-              <div
-                v-for="(s, i) in sched.result.schedule || []"
-                :key="i"
-                class="timeline-item"
-              >
-                <div class="timeline-axis">
-                  <div class="timeline-dot"></div>
-                  <div
-                    v-if="i < (sched.result.schedule || []).length - 1"
-                    class="timeline-line"
-                  ></div>
-                </div>
-                <div class="timeline-body">
-                  <span class="time">{{ s.time }}</span>
-                  <span class="title">{{ s.title }}</span>
-                  <span class="est">🍅{{ s.estPomodoros ?? '?' }}</span>
-                </div>
-              </div>
+            <div v-for="(s, i) in sched.result.schedule || []" :key="i" class="result-row">
+              <span class="time">{{ s.time }}</span>
+              <span class="title">{{ s.title }}</span>
+              <span class="est">🍅{{ s.estPomodoros ?? '?' }}</span>
             </div>
             <n-button size="small" type="primary" @click="importSchedule">
               导入任务列表（{{ (sched.result.schedule || []).length }}）
@@ -80,14 +64,7 @@
       <n-collapse-item title="③ 周复盘" name="review">
         <div class="panel">
           <p class="hint">自动汇总本周专注统计生成复盘</p>
-          <div class="btn-row">
-            <n-button type="primary" :loading="review.loading" @click="runReview">
-              生成周复盘
-            </n-button>
-            <n-button v-if="review.result" size="small" quaternary @click="copyReview">
-              复制复盘
-            </n-button>
-          </div>
+          <n-button type="primary" :loading="review.loading" @click="runReview">生成周复盘</n-button>
 
           <div v-if="review.result" class="result">
             <p class="summary">{{ review.result.summary }}</p>
@@ -149,13 +126,11 @@ import {
 } from '../api/prompts'
 import { useTasks } from '../composables/useTasks'
 import { useStats } from '../composables/useStats'
-import { getPomodoroEvents } from '../utils/storage'
-import { startOfDay } from '../utils/date'
 
 const message = useMessage()
 const isMock = getAIConfig().useMock
 
-const { tasks, ensureLoaded, addTask, dedupeByTitle } = useTasks()
+const { tasks, ensureLoaded, addTask } = useTasks()
 const { today, week, total, last7Days, taskStats, load: loadStats } = useStats()
 
 // 四个 Agent 的独立状态
@@ -186,32 +161,12 @@ async function runSplit() {
   await runAgent(split, buildSplitPrompt(text))
 }
 
-/** 批量导入（去重：跳过与现有任务标题重复的项；逐条容错，单条失败不影响其余） */
-async function importList(list) {
-  if (!list.length) return
-  try {
-    await ensureLoaded()
-    const fresh = dedupeByTitle(tasks.value.map((t) => t.title), list)
-    let ok = 0
-    for (const t of fresh) {
-      try {
-        await addTask(t.title, t.estPomodoros)
-        ok++
-      } catch {
-        /* 单条写入失败跳过 */
-      }
-    }
-    const skipped = list.length - ok
-    message.success(
-      skipped > 0 ? `已导入 ${ok} 个任务（跳过 ${skipped} 个）` : `已导入 ${ok} 个任务到任务列表`
-    )
-  } catch {
-    message.error('导入失败，请重试')
-  }
-}
-
 async function importSplit() {
-  await importList(split.result?.tasks || [])
+  const list = split.result?.tasks || []
+  if (!list.length) return
+  await ensureLoaded()
+  for (const t of list) await addTask(t.title, t.estPomodoros)
+  message.success(`已导入 ${list.length} 个任务到任务列表`)
 }
 
 // ② 智能排程（自动读取未完成任务）
@@ -222,7 +177,11 @@ async function runSchedule() {
 }
 
 async function importSchedule() {
-  await importList(sched.result?.schedule || [])
+  const list = sched.result?.schedule || []
+  if (!list.length) return
+  await ensureLoaded()
+  for (const s of list) await addTask(s.title, s.estPomodoros)
+  message.success(`已导入 ${list.length} 个任务到任务列表`)
 }
 
 // ③ 周复盘（自动汇总统计）
@@ -238,55 +197,10 @@ async function runReview() {
   await runAgent(review, buildReviewPrompt(text))
 }
 
-/** 复制复盘文本（剪贴板 API + 降级方案） */
-async function copyReview() {
-  const r = review.result
-  if (!r) return
-  const lines = [
-    `【周复盘】${r.summary || ''}`,
-    '',
-    '✅ 做得好的：',
-    ...(r.highlights || []).map((h) => `· ${h}`),
-    '',
-    '⚠️ 存在的问题：',
-    ...(r.problems || []).map((p) => `· ${p}`),
-    '',
-    '💡 下周建议：',
-    ...(r.suggestions || []).map((s) => `· ${s}`)
-  ]
-  const text = lines.join('\n')
-  try {
-    await navigator.clipboard.writeText(text)
-    message.success('已复制到剪贴板')
-  } catch {
-    // 降级：非安全上下文等场景用隐藏文本框复制
-    const ta = document.createElement('textarea')
-    ta.value = text
-    ta.style.position = 'fixed'
-    ta.style.opacity = '0'
-    document.body.appendChild(ta)
-    ta.select()
-    try {
-      document.execCommand('copy')
-      message.success('已复制到剪贴板')
-    } catch {
-      message.error('复制失败，请手动选择复制')
-    }
-    ta.remove()
-  }
-}
-
-// ④ 专注状态检测（读取历史放弃/暂停事件 + 统计摘要）
+// ④ 专注状态检测
 async function runFocus() {
   await loadStats()
-  const events = await getPomodoroEvents()
-  const todayStart = startOfDay(Date.now())
-  const todayEvents = events.filter((e) => e.at >= todayStart)
-  const abandoned = todayEvents.filter((e) => e.type === 'abandoned').length
-  const paused = todayEvents.filter((e) => e.type === 'paused').length
-  const base =
-    `今日已完成 ${today.value.count} 个番茄（${today.value.minutes} 分钟）；本周 ${week.value.count} 个（${week.value.minutes} 分钟）。` +
-    `\n今日放弃专注 ${abandoned} 次、暂停 ${paused} 次。`
+  const base = `今日已完成 ${today.value.count} 个番茄（${today.value.minutes} 分钟）；本周 ${week.value.count} 个（${week.value.minutes} 分钟）。`
   const text = focus.input.trim() ? `${base}\n用户自述：${focus.input.trim()}` : base
   await runAgent(focus, buildFocusPrompt(text))
 }
@@ -378,55 +292,6 @@ function stateLabel(state) {
   font-size: 13px;
   color: var(--text-secondary);
   margin: 0;
-}
-
-/* 排程时间轴 */
-.timeline {
-  display: flex;
-  flex-direction: column;
-}
-
-.timeline-item {
-  display: flex;
-  gap: 10px;
-}
-
-.timeline-axis {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  width: 12px;
-  flex-shrink: 0;
-}
-
-.timeline-dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: var(--primary);
-  margin-top: 5px;
-  flex-shrink: 0;
-}
-
-.timeline-line {
-  width: 2px;
-  flex: 1;
-  background: var(--outline);
-  margin: 2px 0;
-}
-
-.timeline-body {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 2px 0 10px;
-  flex: 1;
-}
-
-.btn-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
 }
 
 .list-block {
