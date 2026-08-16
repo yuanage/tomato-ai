@@ -11,7 +11,7 @@
 import assert from 'node:assert/strict'
 import { startOfDay, startOfWeek, isSameDay, weekdayLabel } from '../src/utils/date'
 import { extractJSON, AIError } from '../src/api/ai'
-import { sortTasks } from '../src/composables/useTasks'
+import { sortTasks, normalizeTaskInput } from '../src/composables/useTasks'
 import { mockResponse } from '../src/api/mock'
 
 let passed = 0
@@ -146,6 +146,30 @@ test('不修改原数组', () => {
   const copy = [...list]
   sortTasks(list)
   assert.deepEqual(list, copy)
+})
+
+// ==================== normalizeTaskInput 标题净化 ====================
+section('useTasks.js normalizeTaskInput 批量导入健壮性')
+
+test('正常标题去空格并保留预估番茄数', () => {
+  assert.deepEqual(normalizeTaskInput('  写周报  ', 3), { title: '写周报', estPomodoros: 3 })
+})
+
+test('空标题返回 null（批量导入时跳过该条）', () => {
+  assert.equal(normalizeTaskInput('   '), null)
+})
+
+test('undefined/null 标题返回 null（AI 输出缺字段时不抛异常）', () => {
+  assert.equal(normalizeTaskInput(undefined), null)
+  assert.equal(normalizeTaskInput(null, 2), null)
+})
+
+test('数字等非字符串标题转为字符串', () => {
+  assert.deepEqual(normalizeTaskInput(123), { title: '123', estPomodoros: null })
+})
+
+test('预估番茄数 0 或空转为 null', () => {
+  assert.deepEqual(normalizeTaskInput('任务', 0), { title: '任务', estPomodoros: null })
 })
 
 // ==================== mock.js ====================

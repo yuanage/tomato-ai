@@ -32,16 +32,28 @@ async function persist() {
   await saveTasks(tasks.value)
 }
 
-/** 新增任务，返回任务对象 */
+/**
+ * 任务输入净化（纯函数，便于测试）：
+ * 标题去空格、转字符串；标题为空返回 null（调用方跳过，不打断批量导入）。
+ */
+export function normalizeTaskInput(title, estPomodoros = null) {
+  const safeTitle = String(title ?? '').trim()
+  if (!safeTitle) return null
+  return { title: safeTitle, estPomodoros: estPomodoros || null }
+}
+
+/** 新增任务，返回任务对象；标题为空返回 null */
 export async function addTask(title, estPomodoros = null) {
+  const input = normalizeTaskInput(title, estPomodoros)
+  if (!input) return null
   await ensureLoaded()
   const task = {
     id: genId(),
-    title: title.trim(),
+    title: input.title,
     done: false,
     pinned: false,
     pinnedAt: null,
-    estPomodoros: estPomodoros || null,
+    estPomodoros: input.estPomodoros,
     createdAt: Date.now(),
     completedAt: null
   }

@@ -112,7 +112,7 @@
 </template>
 
 <script setup>
-import { reactive } from 'vue'
+import { reactive, ref } from 'vue'
 import { useMessage } from 'naive-ui'
 import { chatJSON } from '../api/ai'
 import { getAIConfig } from '../api/config'
@@ -128,7 +128,8 @@ import { useTasks } from '../composables/useTasks'
 import { useStats } from '../composables/useStats'
 
 const message = useMessage()
-const isMock = getAIConfig().useMock
+// 【修复】横幅实时化：每次调用前从配置读取，避免"设置页改了这里还是旧状态"
+const isMock = ref(getAIConfig().useMock)
 
 const { tasks, ensureLoaded, addTask } = useTasks()
 const { today, week, total, last7Days, taskStats, load: loadStats } = useStats()
@@ -141,6 +142,7 @@ const focus = reactive({ loading: false, result: null, input: '' })
 
 /** 统一执行入口：loading → 调用 → 错误提示（AIError 消息已汉化） */
 async function runAgent(agent, prompt) {
+  isMock.value = getAIConfig().useMock // 同步最新配置
   agent.loading = true
   agent.result = null
   try {
@@ -165,8 +167,19 @@ async function importSplit() {
   const list = split.result?.tasks || []
   if (!list.length) return
   await ensureLoaded()
-  for (const t of list) await addTask(t.title, t.estPomodoros)
-  message.success(`已导入 ${list.length} 个任务到任务列表`)
+  // 【修复】逐条容错：单条缺标题/写入失败跳过，其余按原顺序完整导入，不再"只导入第一条"
+  let ok = 0
+  for (const t of list) {
+    try {
+      const task = await addTask(t.title, t.estPomodoros)
+      if (task) ok++
+    } catch {
+      /* 单条失败跳过 */
+    }
+  }
+  message.success(
+    ok > 0 ? `已导入 ${ok} 个任务到任务列表` : '没有可导入的任务（子任务缺少标题）'
+  )
 }
 
 // ② 智能排程（自动读取未完成任务）
@@ -180,8 +193,19 @@ async function importSchedule() {
   const list = sched.result?.schedule || []
   if (!list.length) return
   await ensureLoaded()
-  for (const s of list) await addTask(s.title, s.estPomodoros)
-  message.success(`已导入 ${list.length} 个任务到任务列表`)
+  // 【修复】逐条容错，保持排程顺序
+  let ok = 0
+  for (const s of list) {
+    try {
+      const task = await addTask(s.title, s.estPomodoros)
+      if (task) ok++
+    } catch {
+      /* 单条失败跳过 */
+    }
+  }
+  message.success(
+    ok > 0 ? `已导入 ${ok} 个任务到任务列表` : '没有可导入的任务（排程项缺少标题）'
+  )
 }
 
 // ③ 周复盘（自动汇总统计）

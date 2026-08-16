@@ -41,8 +41,8 @@
       </div>
       <div class="field">
         <div class="field-label">模拟模式（无 Key 联调）</div>
-        <n-switch v-model:value="ai.useMock" />
-        <div class="field-hint">开启后 AI 请求返回本地样例数据</div>
+        <n-switch v-model:value="ai.useMock" @update:value="saveMockSwitch" />
+        <div class="field-hint">关闭后 AI 将真实调用接口（切换即保存，无需点保存按钮）</div>
       </div>
       <div class="field-hint">配置仅保存在本机浏览器，不上云；AI 调用只发送任务文本与统计摘要</div>
       <div class="btn-row">
@@ -118,6 +118,16 @@ function saveVibrate(v) {
 function saveAI() {
   saveAIConfig({ ...ai.value })
   message.success('AI 配置已保存')
+}
+
+/** 【修复】模拟模式开关即时持久化，杜绝"切换了却没保存，AI 仍返回预设文字" */
+function saveMockSwitch(v) {
+  saveAIConfig({ ...ai.value })
+  if (!v && !ai.value.apiKey.trim()) {
+    message.warning('已关闭模拟模式，但 API Key 为空——AI 调用将报错，请填写 Key')
+  } else {
+    message.success(v ? '模拟模式已开启（返回本地样例）' : '模拟模式已关闭（AI 将真实调用接口）')
+  }
 }
 
 // 测试连接：先保存配置，再发一个最小请求验证全链路
