@@ -8,6 +8,8 @@
       当前为模拟模式（未配置真实 API Key），返回的是本地样例数据。可在 设置 → AI 配置 中填入 Key 并关闭模拟。
     </n-alert>
 
+    <p class="hint-line">💡 生成过程中切换页面不会中断：结果与输入会自动保存，返回后仍在</p>
+
     <n-collapse :default-expanded-names="['split']" arrow-placement="right">
       <!-- ① 任务拆解 -->
       <n-collapse-item title="① 任务拆解" name="split">
@@ -64,7 +66,14 @@
       <n-collapse-item title="③ 周复盘" name="review">
         <div class="panel">
           <p class="hint">自动汇总本周专注统计生成复盘</p>
-          <n-button type="primary" :loading="review.loading" @click="runReview">生成周复盘</n-button>
+          <div class="btn-row">
+            <n-button type="primary" :loading="review.loading" @click="runReview">
+              生成周复盘
+            </n-button>
+            <n-button v-if="review.result" size="small" quaternary @click="copyReview">
+              复制复盘
+            </n-button>
+          </div>
 
           <div v-if="review.result" class="result">
             <p class="summary">{{ review.result.summary }}</p>
@@ -93,7 +102,12 @@
             :rows="2"
             placeholder="可选：简单描述你现在的状态，例如「下午总是走神，刷手机停不下来」"
           />
-          <n-button type="primary" :loading="focus.loading" @click="runFocus">检测状态</n-button>
+          <div class="btn-row">
+            <n-button type="primary" :loading="focus.loading" @click="runFocus">检测状态</n-button>
+            <n-button v-if="focus.result" size="small" quaternary @click="copyFocus">
+              复制结果
+            </n-button>
+          </div>
 
           <div v-if="focus.result" class="result">
             <div class="focus-head">
@@ -112,10 +126,7 @@
 </template>
 
 <script setup>
-import { reactive, ref } from 'vue'
 import { useMessage } from 'naive-ui'
-import { chatJSON } from '../api/ai'
-import { getAIConfig } from '../api/config'
 import {
   buildSplitPrompt,
   buildSchedulePrompt,
@@ -126,41 +137,26 @@ import {
 } from '../api/prompts'
 import { useTasks } from '../composables/useTasks'
 import { useStats } from '../composables/useStats'
+import { useAiAgents } from '../composables/useAiAgents'
 
 const message = useMessage()
-// 【修复】横幅实时化：每次调用前从配置读取，避免"设置页改了这里还是旧状态"
-const isMock = ref(getAIConfig().useMock)
+
+// 单例状态：切换页面/刷新后结果与输入自动保留（见 useAiAgents）
+const { split, sched, review, focus, isMock, runAgent } = useAiAgents()
 
 const { tasks, ensureLoaded, addTask } = useTasks()
 const { today, week, total, last7Days, taskStats, load: loadStats } = useStats()
 
-// 四个 Agent 的独立状态
-const split = reactive({ loading: false, result: null, input: '' })
-const sched = reactive({ loading: false, result: null })
-const review = reactive({ loading: false, result: null })
-const focus = reactive({ loading: false, result: null, input: '' })
-
-/** 统一执行入口：loading → 调用 → 错误提示（AIError 消息已汉化） */
-async function runAgent(agent, prompt) {
-  isMock.value = getAIConfig().useMock // 同步最新配置
-  agent.loading = true
-  agent.result = null
-  try {
-    const data = await chatJSON(prompt.system, prompt.user)
-    if (data === null || typeof data !== 'object') throw new Error('AI 返回格式异常')
-    agent.result = data
-  } catch (e) {
-    message.error(e.message || 'AI 调用失败')
-  } finally {
-    agent.loading = false
-  }
+/** 统一执行入口：loading → 调用 → 错误提示（AIError 消息已汉化；状态与结果由单例保管） */
+async function runAgentView(agent, prompt) {
+  await runAgent(agent, prompt, { onError: (m) => message.error(m) })
 }
 
 // ① 任务拆解
 async function runSplit() {
   const text = split.input.trim()
   if (!text) return message.warning('请输入要拆解的任务')
-  await runAgent(split, buildSplitPrompt(text))
+  await runAgentView(split, buildSplitPrompt(text))
 }
 
 async function importSplit() {
@@ -186,7 +182,7 @@ async function importSplit() {
 async function runSchedule() {
   await ensureLoaded()
   const text = tasksToText(tasks.value.filter((t) => !t.done))
-  await runAgent(sched, buildSchedulePrompt(text))
+  await runAgentView(sched, buildSchedulePrompt(text))
 }
 
 async function importSchedule() {
@@ -218,7 +214,55 @@ async function runReview() {
     last7Days: last7Days.value,
     taskStats: taskStats.value
   })
-  await runAgent(review, buildReviewPrompt(text))
+  await runAgentView(review, buildReviewPrompt(text))
+}
+
+/** 复制复盘文本（剪贴板 API + 降级方案）——手动保存选项 */
+function copyReview() {
+  const r = review.result
+  if (!r) return
+  const lines = [
+    `【周复盘】${r.summary || ''}`,
+    '',
+    '✅ 做得好的：',
+    ...(r.highlights || []).map((h) => `· ${h}`),
+    '',
+    '⚠️ 存在的问题：',
+    ...(r.problems || []).map((p) => `· ${p}`),
+    '',
+    '💡 下周建议：',
+    ...(r.suggestions || []).map((s) => `· ${s}`)
+  ]
+  copyText(lines.join('\n'))
+}
+
+/** 复制专注状态结果——手动保存选项 */
+function copyFocus() {
+  const r = focus.result
+  if (!r) return
+  copyText(`【专注状态】${r.state}（健康度 ${r.score}/100）\n${r.analysis}\n建议：${r.advice}`)
+}
+
+/** 通用复制：剪贴板 API 失败时降级隐藏文本框 */
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text)
+    message.success('已复制到剪贴板')
+  } catch {
+    const ta = document.createElement('textarea')
+    ta.value = text
+    ta.style.position = 'fixed'
+    ta.style.opacity = '0'
+    document.body.appendChild(ta)
+    ta.select()
+    try {
+      document.execCommand('copy')
+      message.success('已复制到剪贴板')
+    } catch {
+      message.error('复制失败，请手动选择复制')
+    }
+    ta.remove()
+  }
 }
 
 // ④ 专注状态检测
@@ -226,7 +270,7 @@ async function runFocus() {
   await loadStats()
   const base = `今日已完成 ${today.value.count} 个番茄（${today.value.minutes} 分钟）；本周 ${week.value.count} 个（${week.value.minutes} 分钟）。`
   const text = focus.input.trim() ? `${base}\n用户自述：${focus.input.trim()}` : base
-  await runAgent(focus, buildFocusPrompt(text))
+  await runAgentView(focus, buildFocusPrompt(text))
 }
 
 function stateLabel(state) {
@@ -249,6 +293,18 @@ function stateLabel(state) {
 
 .mock-tip {
   font-size: 12px;
+}
+
+.hint-line {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+.btn-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .panel {

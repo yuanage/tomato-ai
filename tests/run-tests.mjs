@@ -12,6 +12,7 @@ import assert from 'node:assert/strict'
 import { startOfDay, startOfWeek, isSameDay, weekdayLabel } from '../src/utils/date'
 import { extractJSON, AIError } from '../src/api/ai'
 import { sortTasks, normalizeTaskInput } from '../src/composables/useTasks'
+import { sanitizeSavedState } from '../src/utils/aiState'
 import { mockResponse } from '../src/api/mock'
 
 let passed = 0
@@ -170,6 +171,37 @@ test('数字等非字符串标题转为字符串', () => {
 
 test('预估番茄数 0 或空转为 null', () => {
   assert.deepEqual(normalizeTaskInput('任务', 0), { title: '任务', estPomodoros: null })
+})
+
+// ==================== sanitizeSavedState AI状态恢复 ====================
+section('aiState.js sanitizeSavedState 状态恢复净化')
+
+test('空/非法输入返回默认结构', () => {
+  const d = sanitizeSavedState(null)
+  assert.equal(d.split.result, null)
+  assert.equal(d.split.input, '')
+  assert.equal(d.review.result, null)
+  assert.deepEqual(sanitizeSavedState('bad'), d)
+})
+
+test('合法的 result 与 input 被保留', () => {
+  const r = sanitizeSavedState({
+    split: { result: { tasks: [{ title: 'a' }] }, input: '大任务' },
+    review: { result: { summary: 'ok' } }
+  })
+  assert.equal(r.split.result.tasks.length, 1)
+  assert.equal(r.split.input, '大任务')
+  assert.equal(r.review.result.summary, 'ok')
+})
+
+test('非对象 result 被丢弃', () => {
+  const r = sanitizeSavedState({ sched: { result: 'not-object' } })
+  assert.equal(r.sched.result, null)
+})
+
+test('非字符串 input 被丢弃', () => {
+  const r = sanitizeSavedState({ focus: { input: 123 } })
+  assert.equal(r.focus.input, '')
 })
 
 // ==================== mock.js ====================
