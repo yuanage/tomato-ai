@@ -1,0 +1,503 @@
+<template>
+  <div class="ai-page">
+    <!-- 隐私声明 + Mock 模式提示 -->
+    <p class="privacy">
+      🔒 仅发送任务文本与统计摘要给模型，不保存任何隐私；数据全部留在本地。
+    </p>
+    <n-alert v-if="isMock" type="info" :bordered="false" class="mock-tip">
+      当前为模拟模式（未配置真实 API Key），返回的是本地样例数据。可在 设置 → AI 配置 中填入 Key 并关闭模拟。
+    </n-alert>
+
+    <n-collapse :default-expanded-names="['split']" arrow-placement="right">
+      <!-- ① 任务拆解 -->
+      <n-collapse-item title="① 任务拆解" name="split">
+        <div class="panel">
+          <n-input
+            v-model:value="split.input"
+            type="textarea"
+            :rows="2"
+            placeholder="输入一个大任务，例如：准备下周三的产品发布会"
+          />
+          <n-button
+            type="primary"
+            :loading="split.loading"
+            :disabled="!split.input.trim()"
+            @click="runSplit"
+          >
+            开始拆解
+          </n-button>
+
+          <div v-if="split.result" class="result">
+            <div v-for="(t, i) in split.result.tasks || []" :key="i" class="result-row">
+              <span class="idx">{{ i + 1 }}</span>
+              <span class="title">{{ t.title }}</span>
+              <span class="est">🍅{{ t.estPomodoros ?? '?' }}</span>
+            </div>
+            <n-button size="small" type="primary" @click="importSplit">
+              导入任务列表（{{ (split.result.tasks || []).length }}）
+            </n-button>
+          </div>
+        </div>
+      </n-collapse-item>
+
+      <!-- ② 智能排程 -->
+      <n-collapse-item title="② 智能排程（今日）" name="schedule">
+        <div class="panel">
+          <p class="hint">自动读取当前未完成任务进行排程</p>
+          <n-button type="primary" :loading="sched.loading" @click="runSchedule">生成今日排程</n-button>
+
+          <div v-if="sched.result" class="result">
+            <p class="tip">{{ sched.result.tip }}</p>
+            <!-- 排程时间轴可视化 -->
+            <div class="timeline">
+              <div
+                v-for="(s, i) in sched.result.schedule || []"
+                :key="i"
+                class="timeline-item"
+              >
+                <div class="timeline-axis">
+                  <div class="timeline-dot"></div>
+                  <div
+                    v-if="i < (sched.result.schedule || []).length - 1"
+                    class="timeline-line"
+                  ></div>
+                </div>
+                <div class="timeline-body">
+                  <span class="time">{{ s.time }}</span>
+                  <span class="title">{{ s.title }}</span>
+                  <span class="est">🍅{{ s.estPomodoros ?? '?' }}</span>
+                </div>
+              </div>
+            </div>
+            <n-button size="small" type="primary" @click="importSchedule">
+              导入任务列表（{{ (sched.result.schedule || []).length }}）
+            </n-button>
+          </div>
+        </div>
+      </n-collapse-item>
+
+      <!-- ③ 周复盘 -->
+      <n-collapse-item title="③ 周复盘" name="review">
+        <div class="panel">
+          <p class="hint">自动汇总本周专注统计生成复盘</p>
+          <div class="btn-row">
+            <n-button type="primary" :loading="review.loading" @click="runReview">
+              生成周复盘
+            </n-button>
+            <n-button v-if="review.result" size="small" quaternary @click="copyReview">
+              复制复盘
+            </n-button>
+          </div>
+
+          <div v-if="review.result" class="result">
+            <p class="summary">{{ review.result.summary }}</p>
+            <div v-if="review.result.highlights?.length" class="list-block">
+              <div class="list-title">✅ 做得好的</div>
+              <div v-for="(h, i) in review.result.highlights" :key="i" class="list-item">{{ h }}</div>
+            </div>
+            <div v-if="review.result.problems?.length" class="list-block">
+              <div class="list-title">⚠️ 存在的问题</div>
+              <div v-for="(p, i) in review.result.problems" :key="i" class="list-item">{{ p }}</div>
+            </div>
+            <div v-if="review.result.suggestions?.length" class="list-block">
+              <div class="list-title">💡 下周建议</div>
+              <div v-for="(s, i) in review.result.suggestions" :key="i" class="list-item">{{ s }}</div>
+            </div>
+          </div>
+        </div>
+      </n-collapse-item>
+
+      <!-- ④ 专注状态检测 -->
+      <n-collapse-item title="④ 专注状态检测" name="focus">
+        <div class="panel">
+          <n-input
+            v-model:value="focus.input"
+            type="textarea"
+            :rows="2"
+            placeholder="可选：简单描述你现在的状态，例如「下午总是走神，刷手机停不下来」"
+          />
+          <n-button type="primary" :loading="focus.loading" @click="runFocus">检测状态</n-button>
+
+          <div v-if="focus.result" class="result">
+            <div class="focus-head">
+              <span class="state-badge" :class="focus.result.state">
+                {{ stateLabel(focus.result.state) }}
+              </span>
+              <span class="score">专注健康度 {{ focus.result.score }}/100</span>
+            </div>
+            <p class="analysis">{{ focus.result.analysis }}</p>
+            <div class="advice">💡 {{ focus.result.advice }}</div>
+          </div>
+        </div>
+      </n-collapse-item>
+    </n-collapse>
+  </div>
+</template>
+
+<script setup>
+import { reactive } from 'vue'
+import { useMessage } from 'naive-ui'
+import { chatJSON } from '../api/ai'
+import { getAIConfig } from '../api/config'
+import {
+  buildSplitPrompt,
+  buildSchedulePrompt,
+  buildReviewPrompt,
+  buildFocusPrompt,
+  tasksToText,
+  statsToText
+} from '../api/prompts'
+import { useTasks } from '../composables/useTasks'
+import { useStats } from '../composables/useStats'
+import { getPomodoroEvents } from '../utils/storage'
+import { startOfDay } from '../utils/date'
+
+const message = useMessage()
+const isMock = getAIConfig().useMock
+
+const { tasks, ensureLoaded, addTask, dedupeByTitle } = useTasks()
+const { today, week, total, last7Days, taskStats, load: loadStats } = useStats()
+
+// 四个 Agent 的独立状态
+const split = reactive({ loading: false, result: null, input: '' })
+const sched = reactive({ loading: false, result: null })
+const review = reactive({ loading: false, result: null })
+const focus = reactive({ loading: false, result: null, input: '' })
+
+/** 统一执行入口：loading → 调用 → 错误提示（AIError 消息已汉化） */
+async function runAgent(agent, prompt) {
+  agent.loading = true
+  agent.result = null
+  try {
+    const data = await chatJSON(prompt.system, prompt.user)
+    if (data === null || typeof data !== 'object') throw new Error('AI 返回格式异常')
+    agent.result = data
+  } catch (e) {
+    message.error(e.message || 'AI 调用失败')
+  } finally {
+    agent.loading = false
+  }
+}
+
+// ① 任务拆解
+async function runSplit() {
+  const text = split.input.trim()
+  if (!text) return message.warning('请输入要拆解的任务')
+  await runAgent(split, buildSplitPrompt(text))
+}
+
+/** 批量导入（去重：跳过与现有任务标题重复的项；逐条容错，单条失败不影响其余） */
+async function importList(list) {
+  if (!list.length) return
+  try {
+    await ensureLoaded()
+    const fresh = dedupeByTitle(tasks.value.map((t) => t.title), list)
+    let ok = 0
+    for (const t of fresh) {
+      try {
+        await addTask(t.title, t.estPomodoros)
+        ok++
+      } catch {
+        /* 单条写入失败跳过 */
+      }
+    }
+    const skipped = list.length - ok
+    message.success(
+      skipped > 0 ? `已导入 ${ok} 个任务（跳过 ${skipped} 个）` : `已导入 ${ok} 个任务到任务列表`
+    )
+  } catch {
+    message.error('导入失败，请重试')
+  }
+}
+
+async function importSplit() {
+  await importList(split.result?.tasks || [])
+}
+
+// ② 智能排程（自动读取未完成任务）
+async function runSchedule() {
+  await ensureLoaded()
+  const text = tasksToText(tasks.value.filter((t) => !t.done))
+  await runAgent(sched, buildSchedulePrompt(text))
+}
+
+async function importSchedule() {
+  await importList(sched.result?.schedule || [])
+}
+
+// ③ 周复盘（自动汇总统计）
+async function runReview() {
+  await loadStats()
+  const text = statsToText({
+    today: today.value,
+    week: week.value,
+    total: total.value,
+    last7Days: last7Days.value,
+    taskStats: taskStats.value
+  })
+  await runAgent(review, buildReviewPrompt(text))
+}
+
+/** 复制复盘文本（剪贴板 API + 降级方案） */
+async function copyReview() {
+  const r = review.result
+  if (!r) return
+  const lines = [
+    `【周复盘】${r.summary || ''}`,
+    '',
+    '✅ 做得好的：',
+    ...(r.highlights || []).map((h) => `· ${h}`),
+    '',
+    '⚠️ 存在的问题：',
+    ...(r.problems || []).map((p) => `· ${p}`),
+    '',
+    '💡 下周建议：',
+    ...(r.suggestions || []).map((s) => `· ${s}`)
+  ]
+  const text = lines.join('\n')
+  try {
+    await navigator.clipboard.writeText(text)
+    message.success('已复制到剪贴板')
+  } catch {
+    // 降级：非安全上下文等场景用隐藏文本框复制
+    const ta = document.createElement('textarea')
+    ta.value = text
+    ta.style.position = 'fixed'
+    ta.style.opacity = '0'
+    document.body.appendChild(ta)
+    ta.select()
+    try {
+      document.execCommand('copy')
+      message.success('已复制到剪贴板')
+    } catch {
+      message.error('复制失败，请手动选择复制')
+    }
+    ta.remove()
+  }
+}
+
+// ④ 专注状态检测（读取历史放弃/暂停事件 + 统计摘要）
+async function runFocus() {
+  await loadStats()
+  const events = await getPomodoroEvents()
+  const todayStart = startOfDay(Date.now())
+  const todayEvents = events.filter((e) => e.at >= todayStart)
+  const abandoned = todayEvents.filter((e) => e.type === 'abandoned').length
+  const paused = todayEvents.filter((e) => e.type === 'paused').length
+  const base =
+    `今日已完成 ${today.value.count} 个番茄（${today.value.minutes} 分钟）；本周 ${week.value.count} 个（${week.value.minutes} 分钟）。` +
+    `\n今日放弃专注 ${abandoned} 次、暂停 ${paused} 次。`
+  const text = focus.input.trim() ? `${base}\n用户自述：${focus.input.trim()}` : base
+  await runAgent(focus, buildFocusPrompt(text))
+}
+
+function stateLabel(state) {
+  return { focused: '状态良好', normal: '状态一般', distracted: '明显走神' }[state] || state
+}
+</script>
+
+<style scoped>
+.ai-page {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.privacy {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  margin: 0;
+}
+
+.mock-tip {
+  font-size: 12px;
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.hint {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  margin: 0;
+}
+
+.result {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border-top: 1px dashed var(--outline);
+  padding-top: 10px;
+}
+
+.result-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+}
+
+.idx {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--surface-variant);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.time {
+  color: var(--primary);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+  flex-shrink: 0;
+}
+
+.title {
+  flex: 1;
+  word-break: break-all;
+}
+
+.est {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+}
+
+.tip,
+.summary {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+/* 排程时间轴 */
+.timeline {
+  display: flex;
+  flex-direction: column;
+}
+
+.timeline-item {
+  display: flex;
+  gap: 10px;
+}
+
+.timeline-axis {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 12px;
+  flex-shrink: 0;
+}
+
+.timeline-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--primary);
+  margin-top: 5px;
+  flex-shrink: 0;
+}
+
+.timeline-line {
+  width: 2px;
+  flex: 1;
+  background: var(--outline);
+  margin: 2px 0;
+}
+
+.timeline-body {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0 10px;
+  flex: 1;
+}
+
+.btn-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.list-block {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.list-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.list-item {
+  font-size: 13px;
+  color: var(--text-primary);
+  padding-left: 12px;
+  position: relative;
+}
+
+.list-item::before {
+  content: '·';
+  position: absolute;
+  left: 4px;
+  color: var(--text-tertiary);
+}
+
+.focus-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* 状态徽章：Google 规范状态色 */
+.state-badge {
+  font-size: 12px;
+  font-weight: 500;
+  padding: 3px 12px;
+  border-radius: var(--radius-pill);
+  color: #ffffff;
+}
+
+.state-badge.focused {
+  background: var(--success);
+}
+
+.state-badge.normal {
+  background: var(--warning);
+}
+
+.state-badge.distracted {
+  background: var(--danger);
+}
+
+.score {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.analysis {
+  font-size: 13px;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.advice {
+  font-size: 13px;
+  color: var(--text-primary);
+  background: var(--surface-variant);
+  border-radius: var(--radius-s);
+  padding: 10px 12px;
+}
+</style>

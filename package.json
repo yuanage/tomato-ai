@@ -1,0 +1,27 @@
+{
+  "name": "tomato-ai",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "极简AI时间管理APP：番茄钟 + 任务清单 + AI助手，本地优先，零广告零社交",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "vite build --ssr tests/run-tests.mjs --outDir .test-build && node .test-build/run-tests.js",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "localforage": "^1.10.0",
+    "naive-ui": "^2.40.1",
+    "vue": "^3.5.13",
+    "vue-router": "^4.5.0"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.4.0",
+    "@vitejs/plugin-vue": "^5.2.1",
+    "unplugin-auto-import": "^19.0.0",
+    "unplugin-vue-components": "^28.0.0",
+    "vite": "^6.0.7"
+  }
+}

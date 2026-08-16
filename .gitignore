@@ -1,0 +1,10 @@
+node_modules
+dist
+.test-build
+*.local
+.DS_Store
+# 安全扫描插件审计日志（工具生成，不入库）
+.mimosa
+# unplugin 自动生成的类型声明文件（首次 dev/build 时自动重新生成）
+src/auto-imports.d.ts
+src/components.d.ts
