@@ -4,9 +4,13 @@
     <n-message-provider>
       <n-dialog-provider>
         <div class="app-shell">
-          <!-- 主内容区：路由出口 -->
+          <!-- 主内容区：路由出口（150ms 淡入淡出，reduced-motion 时自动禁用） -->
           <main class="app-main">
-            <router-view />
+            <router-view v-slot="{ Component }">
+              <transition name="page" mode="out-in">
+                <component :is="Component" />
+              </transition>
+            </router-view>
           </main>
 
           <!-- 底部导航：5 个一级页面，激活项胶囊高亮 -->
@@ -175,11 +179,24 @@ const navItems = [
   border-radius: 14px;
   font-size: 17px;
   line-height: 1;
-  transition: background-color 0.2s ease;
+  transition: background-color var(--motion-normal) var(--ease-standard),
+    transform var(--motion-fast) var(--ease-standard);
 }
 
 .nav-item.active .nav-icon {
   background: var(--primary-container);
+  transform: scale(1.08);
+}
+
+/* 页面切换微动效 */
+.page-enter-active,
+.page-leave-active {
+  transition: opacity var(--motion-fast) var(--ease-standard);
+}
+
+.page-enter-from,
+.page-leave-to {
+  opacity: 0;
 }
 
 .nav-label {

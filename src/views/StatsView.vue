@@ -1,6 +1,17 @@
 <template>
   <div class="stats">
     <n-spin :show="loading">
+      <!-- 骨架屏：首次加载且无数据时 -->
+      <template v-if="loading && total === 0">
+        <div class="stats-grid">
+          <div v-for="i in 4" :key="i" class="stat-card skeleton-card">
+            <div class="sk sk-label"></div>
+            <div class="sk sk-num"></div>
+          </div>
+        </div>
+      </template>
+
+      <template v-else>
       <div class="stats-grid">
         <!-- 今日 -->
         <div class="stat-card">
@@ -23,29 +34,24 @@
           <div class="stat-sub">全部记录在本地</div>
         </div>
 
-        <!-- 任务完成率 -->
+        <!-- 任务完成率（环形） -->
         <div class="stat-card">
           <div class="stat-label">任务完成率</div>
-          <div class="stat-num">{{ taskStats.rate }}<span class="stat-percent">%</span></div>
+          <div class="rate-wrap">
+            <TimerRing :progress="taskStats.rate / 100" :size="72" :stroke-width="7">
+              <span class="rate-num">{{ taskStats.rate }}<span class="rate-percent">%</span></span>
+            </TimerRing>
+          </div>
           <div class="stat-sub">{{ taskStats.done }} / {{ taskStats.total }} 已完成</div>
         </div>
       </div>
 
-      <!-- 近 7 天柱状图（纯 CSS，零依赖） -->
+      <!-- 近 7 天趋势（SVG 柱状 + 折线，零依赖） -->
       <div class="chart-card">
         <div class="chart-title">近 7 天</div>
-        <div class="bar-chart">
-          <div v-for="(d, i) in last7Days" :key="d.label" class="bar-item">
-            <div class="bar-count">{{ d.count || '' }}</div>
-            <div
-              class="bar"
-              :style="{ height: barHeight(d.count) }"
-              :class="{ empty: d.count === 0, today: i === last7Days.length - 1 }"
-            ></div>
-            <div class="bar-label" :class="{ today: i === last7Days.length - 1 }">{{ d.label }}</div>
-          </div>
-        </div>
+        <TrendChart :data="last7Days" />
       </div>
+      </template>
     </n-spin>
   </div>
 </template>
@@ -54,6 +60,8 @@
 import { onMounted, onUnmounted } from 'vue'
 import { useStats } from '../composables/useStats'
 import { on as onEvent } from '../utils/events'
+import TimerRing from '../components/TimerRing.vue'
+import TrendChart from '../components/TrendChart.vue'
 
 const { loading, today, week, total, last7Days, taskStats, load } = useStats()
 
@@ -76,11 +84,6 @@ function onVisible() {
   if (document.visibilityState === 'visible') load()
 }
 
-/** 柱高按当天占比映射到 96px 内，最少 6px 保证可见 */
-function barHeight(count) {
-  const max = Math.max(...last7Days.value.map((d) => d.count), 1)
-  return `${Math.max(6, Math.round((count / max) * 96))}px`
-}
 </script>
 
 <style scoped>
@@ -144,56 +147,49 @@ function barHeight(count) {
   margin-bottom: 12px;
 }
 
-.bar-chart {
+/* 完成率环形 */
+.rate-wrap {
   display: flex;
-  align-items: flex-end;
-  gap: 8px;
-  height: 118px;
+  justify-content: center;
+  margin: 8px 0;
 }
 
-.bar-item {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  height: 100%;
-  justify-content: flex-end;
-}
-
-.bar-count {
-  font-size: 11px;
-  color: var(--text-tertiary);
-  height: 14px;
+.rate-num {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
   font-variant-numeric: tabular-nums;
 }
 
-/* 历史柱降透明度，今日柱满透明度高亮 */
-.bar {
-  width: 70%;
-  background: var(--primary);
-  border-radius: 6px 6px 0 0;
-  opacity: 0.4;
-  min-height: 4px;
-}
-
-.bar.today {
-  opacity: 1;
-}
-
-.bar.empty {
-  background: var(--outline);
-  height: 6px !important;
-  opacity: 1;
-}
-
-.bar-label {
+.rate-percent {
   font-size: 11px;
   color: var(--text-tertiary);
 }
 
-.bar-label.today {
-  color: var(--primary);
-  font-weight: 500;
+/* 骨架屏 */
+.skeleton-card {
+  animation: sk-pulse 1.2s ease-in-out infinite;
+}
+
+.sk {
+  background: var(--surface-variant);
+  border-radius: 6px;
+}
+
+.sk-label {
+  height: 12px;
+  width: 40%;
+  margin-bottom: 12px;
+}
+
+.sk-num {
+  height: 28px;
+  width: 60%;
+}
+
+@keyframes sk-pulse {
+  50% {
+    opacity: 0.55;
+  }
 }
 </style>
