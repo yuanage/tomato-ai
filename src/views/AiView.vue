@@ -30,6 +30,23 @@
           </n-button>
 
           <div v-if="split.result" class="result">
+            <!-- 大标题版块：视觉层级入口 -->
+            <div class="result-header">
+              <div class="result-title">🤖 AI 生成任务列表</div>
+              <p v-if="restored" class="restored-hint">📂 已自动恢复上次的生成结果（切页/重启不丢失）</p>
+              <div class="result-divider"></div>
+            </div>
+
+            <!-- AI 思考过程（默认折叠） -->
+            <div v-if="split.reasoning" class="reasoning-block">
+              <button class="reasoning-toggle" type="button" @click="showReasoning = !showReasoning">
+                🧠 AI 思考过程 {{ showReasoning ? '▲ 收起' : '▼ 展开' }}
+              </button>
+              <div v-show="showReasoning" class="reasoning-body">
+                <p v-for="(line, i) in reasoningLines" :key="i" class="reasoning-line">{{ line }}</p>
+              </div>
+            </div>
+
             <div v-for="(t, i) in split.result.tasks || []" :key="i" class="result-row">
               <span class="idx">{{ i + 1 }}</span>
               <span class="title">{{ t.title }}</span>
@@ -126,6 +143,7 @@
 </template>
 
 <script setup>
+import { ref, computed } from 'vue'
 import { useMessage } from 'naive-ui'
 import {
   buildSplitPrompt,
@@ -142,7 +160,16 @@ import { useAiAgents } from '../composables/useAiAgents'
 const message = useMessage()
 
 // 单例状态：切换页面/刷新后结果与输入自动保留（见 useAiAgents）
-const { split, sched, review, focus, isMock, runAgent } = useAiAgents()
+const { split, sched, review, focus, isMock, restored, runAgent } = useAiAgents()
+
+// 思考过程折叠面板（默认折叠）
+const showReasoning = ref(false)
+const reasoningLines = computed(() =>
+  String(split.reasoning || '')
+    .split(/\n+/)
+    .map((l) => l.trim())
+    .filter(Boolean)
+)
 
 const { tasks, ensureLoaded, addTask } = useTasks()
 const { today, week, total, last7Days, taskStats, load: loadStats } = useStats()
@@ -325,6 +352,72 @@ function stateLabel(state) {
   gap: 6px;
   border-top: 1px dashed var(--outline);
   padding-top: 10px;
+}
+
+/* 大标题版块：字号/分隔线与任务内容形成清晰层级 */
+.result-header {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.result-title {
+  font-size: clamp(16px, 4.5vw, 20px); /* 响应式字号 */
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: 0.3px;
+}
+
+.result-divider {
+  height: 1px;
+  background: var(--outline);
+  margin: 4px 0 6px;
+}
+
+.restored-hint {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  margin: 0;
+}
+
+/* AI 思考过程折叠面板 */
+.reasoning-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.reasoning-toggle {
+  align-self: flex-start;
+  background: none;
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-s);
+  padding: 4px 10px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.reasoning-body {
+  background: var(--surface-variant);
+  border-radius: var(--radius-s);
+  padding: 10px 12px;
+}
+
+.reasoning-line {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.7;
+  margin: 0 0 4px;
+  padding-left: 10px;
+  position: relative;
+}
+
+.reasoning-line::before {
+  content: '·';
+  position: absolute;
+  left: 2px;
+  color: var(--text-tertiary);
 }
 
 .result-row {

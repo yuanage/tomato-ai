@@ -50,3 +50,38 @@ function buildMock(system, user) {
   // 兜底
   return { result: 'ok' }
 }
+
+/** 模拟模式下的 AI 思考过程样例（按 AGENT_ID 返回，多行文本） */
+export function mockReasoning(systemPrompt) {
+  if (systemPrompt.includes('AGENT_ID: task_split')) {
+    return [
+      '1. 解析任务目标与范围，确认最终交付物',
+      '2. 识别可独立执行的子任务边界，避免相互依赖过强',
+      '3. 按 1~2 个番茄（25 分钟）的粒度切分每个子任务',
+      '4. 为每项预估番茄数，并按执行顺序排序输出'
+    ].join('\n')
+  }
+  if (systemPrompt.includes('AGENT_ID: schedule')) {
+    return [
+      '1. 读取今日任务清单与各自预估时长',
+      '2. 按精力曲线把深度任务排布到上午时段',
+      '3. 任务之间插入 5~10 分钟缓冲与休息',
+      '4. 校验全天安排不超载后输出时间轴'
+    ].join('\n')
+  }
+  if (systemPrompt.includes('AGENT_ID: review')) {
+    return [
+      '1. 汇总本周番茄总量、专注时长与任务完成率',
+      '2. 对比近 7 天趋势，定位异常波动日',
+      '3. 提炼亮点与问题，生成下周可执行建议'
+    ].join('\n')
+  }
+  if (systemPrompt.includes('AGENT_ID: focus')) {
+    return [
+      '1. 分析今日专注完成量与放弃/暂停记录',
+      '2. 结合用户自述判断状态区间（好/一般/走神）',
+      '3. 生成一条可立即执行的具体建议'
+    ].join('\n')
+  }
+  return ''
+}

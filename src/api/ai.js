@@ -1,5 +1,5 @@
 import { getAIConfig } from './config'
-import { mockResponse } from './mock'
+import { mockResponse, mockReasoning } from './mock'
 
 /**
  * AI 请求模块
@@ -66,12 +66,24 @@ export function extractJSON(text) {
 
 /**
  * 核心调用：systemPrompt + userContent → 解析后的 JSON 对象
+ * options.onReasoning：推理模型返回思考过程（reasoning_content）时回调；
+ * 模拟模式下回调本地样例思考步骤。
  */
-export async function chatJSON(systemPrompt, userContent, { temperature = 0.3 } = {}) {
+export async function chatJSON(systemPrompt, userContent, { temperature = 0.3, onReasoning } = {}) {
   const cfg = getAIConfig()
 
   // Mock 模式：返回本地样例，便于无 Key 联调
-  if (cfg.useMock) return mockResponse(systemPrompt, userContent)
+  if (cfg.useMock) {
+    const data = await mockResponse(systemPrompt, userContent)
+    if (onReasoning) {
+      const reasoning = mockReasoning(systemPrompt)
+      if (reasoning) {
+        await new Promise((resolve) => setTimeout(resolve, 300))
+        onReasoning(reasoning)
+      }
+    }
+    return data
+  }
 
   if (!cfg.apiKey) {
     throw new AIError('未配置 API Key，请到 设置 → AI 配置 填写', 'no_key')
@@ -128,6 +140,12 @@ export async function chatJSON(systemPrompt, userContent, { temperature = 0.3 } 
   const content = data?.choices?.[0]?.message?.content
   if (!content) {
     throw new AIError('接口未返回内容', 'empty')
+  }
+
+  // 推理模型的思考过程（DeepSeek-R1 等 OpenAI 兼容接口以 reasoning_content 返回）
+  const reasoning = data?.choices?.[0]?.message?.reasoning_content
+  if (reasoning && onReasoning) {
+    onReasoning(String(reasoning))
   }
 
   return extractJSON(content)

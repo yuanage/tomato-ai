@@ -14,23 +14,25 @@ import { sanitizeSavedState } from '../utils/aiState'
 
 const STORAGE_KEY = 'ai_agent_state'
 
-// 四个 Agent 的独立状态（error 用于页面展示，loading 跨页面保持）
-const split = reactive({ loading: false, result: null, input: '', error: null })
-const sched = reactive({ loading: false, result: null, error: null })
-const review = reactive({ loading: false, result: null, error: null })
-const focus = reactive({ loading: false, result: null, input: '', error: null })
+// 四个 Agent 的独立状态（error 用于页面展示，loading 跨页面保持，reasoning 为思考过程）
+const split = reactive({ loading: false, result: null, input: '', error: null, reasoning: '' })
+const sched = reactive({ loading: false, result: null, error: null, reasoning: '' })
+const review = reactive({ loading: false, result: null, error: null, reasoning: '' })
+const focus = reactive({ loading: false, result: null, input: '', error: null, reasoning: '' })
 
 const isMock = ref(getAIConfig().useMock)
+/** 是否恢复了上次的生成结果（用于页面提示） */
+const restored = ref(false)
 
 function persist() {
   try {
     localStorage.setItem(
       STORAGE_KEY,
       JSON.stringify({
-        split: { result: split.result, input: split.input },
-        sched: { result: sched.result },
-        review: { result: review.result },
-        focus: { result: focus.result, input: focus.input }
+        split: { result: split.result, input: split.input, reasoning: split.reasoning },
+        sched: { result: sched.result, reasoning: sched.reasoning },
+        review: { result: review.result, reasoning: review.reasoning },
+        focus: { result: focus.result, input: focus.input, reasoning: focus.reasoning }
       })
     )
   } catch {
@@ -48,10 +50,15 @@ function restore() {
   const clean = sanitizeSavedState(saved)
   split.result = clean.split.result
   split.input = clean.split.input
+  split.reasoning = clean.split.reasoning
   sched.result = clean.sched.result
+  sched.reasoning = clean.sched.reasoning
   review.result = clean.review.result
+  review.reasoning = clean.review.reasoning
   focus.result = clean.focus.result
   focus.input = clean.focus.input
+  focus.reasoning = clean.focus.reasoning
+  restored.value = !!(clean.split.result || clean.sched.result || clean.review.result || clean.focus.result)
 }
 
 // 模块加载即恢复上次会话的生成结果
@@ -64,15 +71,22 @@ if (import.meta.hot) {
 }
 
 /**
- * 统一执行入口：调用大模型 → 结果写入单例状态并持久化。
+ * 统一执行入口：调用大模型 → 结果与思考过程写入单例状态并持久化。
  * 错误经 onError 回调交给页面提示（useMessage 只能在组件内使用）。
  */
 async function runAgent(agent, prompt, { onError } = {}) {
   isMock.value = getAIConfig().useMock
   agent.loading = true
   agent.error = null
+  agent.reasoning = ''
   try {
-    const data = await chatJSON(prompt.system, prompt.user)
+    const data = await chatJSON(prompt.system, prompt.user, {
+      // 思考过程实时写入状态（推理模型 reasoning_content / 模拟模式样例）
+      onReasoning(text) {
+        agent.reasoning = text
+        persist()
+      }
+    })
     if (data === null || typeof data !== 'object') throw new Error('AI 返回格式异常')
     agent.result = data
     persist()
@@ -86,5 +100,5 @@ async function runAgent(agent, prompt, { onError } = {}) {
 }
 
 export function useAiAgents() {
-  return { split, sched, review, focus, isMock, runAgent }
+  return { split, sched, review, focus, isMock, restored, runAgent }
 }
