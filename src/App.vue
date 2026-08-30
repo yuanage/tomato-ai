@@ -1,6 +1,6 @@
 <template>
-  <!-- Material 风格主题覆写：强调色 / 圆角 / 字体全局注入 NaiveUI -->
-  <n-config-provider :theme-overrides="themeOverrides">
+  <!-- Material 风格主题覆写：强调色 / 圆角 / 字体全局注入 NaiveUI；暗色跟随系统 -->
+  <n-config-provider :theme="naiveTheme" :theme-overrides="themeOverrides">
     <n-message-provider>
       <n-dialog-provider>
         <div class="app-shell">
@@ -29,9 +29,76 @@
 </template>
 
 <script setup>
+import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { darkTheme } from 'naive-ui'
 import { useRoute } from 'vue-router'
 
 const route = useRoute()
+
+// 暗色模式：跟随系统（NaiveUI 主题 + CSS 令牌双轨同步）
+const prefersDark = ref(false)
+let mediaQuery = null
+
+function syncTheme(e) {
+  prefersDark.value = e.matches
+}
+
+onMounted(() => {
+  mediaQuery = window.matchMedia('(prefers-color-scheme: dark)')
+  prefersDark.value = mediaQuery.matches
+  mediaQuery.addEventListener('change', syncTheme)
+})
+
+onUnmounted(() => mediaQuery?.removeEventListener('change', syncTheme))
+
+const naiveTheme = computed(() => (prefersDark.value ? darkTheme : undefined))
+
+// 暗色下同步 NaiveUI 常用令牌（与 CSS 暗色令牌同源）
+const darkCommon = {
+  primaryColor: '#e04866',
+  primaryColorHover: '#ea6a83',
+  primaryColorPressed: '#c73a56',
+  primaryColorSuppl: '#e04866',
+  textColorBase: '#e8e8ea',
+  textColor1: '#e8e8ea',
+  textColor2: '#a8a8ae',
+  textColor3: '#7a7a80',
+  bodyColor: '#111314',
+  cardColor: '#1c1e20',
+  dividerColor: '#33363a'
+}
+
+const themeOverrides = computed(() => ({
+  common: {
+    ...(prefersDark.value ? darkCommon : {}),
+    primaryColor: prefersDark.value ? '#e04866' : '#d03050',
+    primaryColorHover: prefersDark.value ? '#ea6a83' : '#e04866',
+    primaryColorPressed: prefersDark.value ? '#c73a56' : '#b62a46',
+    primaryColorSuppl: prefersDark.value ? '#e04866' : '#d03050',
+    borderRadius: '10px',
+    borderRadiusSmall: '8px',
+    fontFamily:
+      "'Roboto', 'Noto Sans SC', -apple-system, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif",
+    ...(prefersDark.value
+      ? {}
+      : {
+          textColorBase: '#1f1f1f',
+          textColor1: '#1f1f1f',
+          textColor2: '#5f5f66',
+          textColor3: '#9a9aa2',
+          bodyColor: '#f6f6f7',
+          cardColor: '#ffffff',
+          dividerColor: '#ececef'
+        })
+  },
+  Card: { borderRadius: '16px' },
+  Button: {
+    borderRadiusSmall: '999px',
+    borderRadiusMedium: '999px',
+    borderRadiusLarge: '999px'
+  },
+  Input: { borderRadius: '10px' }
+}))
 
 // 5 个一级页面，与路由一一对应
 const navItems = [
@@ -41,38 +108,10 @@ const navItems = [
   { path: '/ai', label: 'AI助手', icon: '🤖' },
   { path: '/settings', label: '设置', icon: '⚙️' }
 ]
-
-// Material 风格：番茄红强调色 + 胶囊按钮圆角 + 统一字体（与 CSS 令牌同源）
-const themeOverrides = {
-  common: {
-    primaryColor: '#d03050',
-    primaryColorHover: '#e04866',
-    primaryColorPressed: '#b62a46',
-    primaryColorSuppl: '#d03050',
-    borderRadius: '10px',
-    borderRadiusSmall: '8px',
-    fontFamily:
-      "'Roboto', 'Noto Sans SC', -apple-system, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif",
-    textColorBase: '#1f1f1f',
-    textColor1: '#1f1f1f',
-    textColor2: '#5f5f66',
-    textColor3: '#9a9aa2',
-    bodyColor: '#f6f6f7',
-    cardColor: '#ffffff',
-    dividerColor: '#ececef'
-  },
-  Card: { borderRadius: '16px' },
-  Button: {
-    borderRadiusSmall: '999px',
-    borderRadiusMedium: '999px',
-    borderRadiusLarge: '999px'
-  },
-  Input: { borderRadius: '10px' }
-}
 </script>
 
 <style scoped>
-/* 手机壳布局：最大宽度 480px 居中，桌面浏览器预览也接近手机形态 */
+/* 手机壳布局：移动优先 480px；≥768px 平板/桌面放宽到 720px */
 .app-shell {
   display: flex;
   flex-direction: column;
@@ -80,6 +119,12 @@ const themeOverrides = {
   max-width: 480px;
   margin: 0 auto;
   background: var(--bg);
+}
+
+@media (min-width: 768px) {
+  .app-shell {
+    max-width: 720px;
+  }
 }
 
 .app-main {

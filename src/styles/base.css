@@ -1,9 +1,9 @@
 /* ============================================================
-   设计令牌（Material Design 风格）
+   设计令牌 v2（Material 风格 · 支持暗色）
    中性色为主 + 番茄红单一强调色；圆角 MD3 尺度；低层级阴影
    ============================================================ */
 :root {
-  /* 色彩 */
+  /* 色彩（亮色） */
   --bg: #f6f6f7;
   --surface: #ffffff;
   --surface-variant: #efeff1;
@@ -38,9 +38,52 @@
   --space-5: 24px;
   --space-6: 32px;
 
+  /* 字号阶梯（v2 新增） */
+  --font-display: 56px;
+  --font-headline: 20px;
+  --font-title: 16px;
+  --font-body: 14px;
+  --font-label: 12px;
+  --font-micro: 11px;
+
+  /* 动效令牌（v2 新增）：全部过渡仅允许使用这两个时长与缓动 */
+  --motion-fast: 150ms;
+  --motion-normal: 200ms;
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+
   /* 字体 */
   --font-family: 'Roboto', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI',
     'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+}
+
+/* 暗色模式：跟随系统（令牌整体覆盖，组件零改动） */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #111314;
+    --surface: #1c1e20;
+    --surface-variant: #26282b;
+    --outline: #33363a;
+    --text-primary: #e8e8ea;
+    --text-secondary: #a8a8ae;
+    --text-tertiary: #7a7a80;
+    --primary: #e04866;
+    --primary-hover: #ea6a83;
+    --primary-pressed: #c73a56;
+    --primary-container: #4a1f2a;
+    --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.3), 0 2px 8px rgba(0, 0, 0, 0.25);
+    --shadow-2: 0 2px 6px rgba(0, 0, 0, 0.35), 0 8px 24px rgba(0, 0, 0, 0.3);
+  }
+}
+
+/* 无障碍：用户偏好减少动效时，全局禁用过渡与动画 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
 }
 
 /* ============================================================
