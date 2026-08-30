@@ -11,6 +11,26 @@
     <p class="hint-line">💡 生成过程中切换页面不会中断：结果与输入会自动保存，返回后仍在</p>
 
     <n-collapse :default-expanded-names="['split']" arrow-placement="right">
+      <!-- ⓪ 离线洞察（Tier 1：零网络本地规则引擎） -->
+      <n-collapse-item title="🏠 离线洞察（无需联网）" name="offline">
+        <div class="panel">
+          <p class="hint">基于本地番茄与任务数据的规则洞察，飞行模式可用</p>
+          <n-button type="primary" :loading="offline.loading" @click="runOfflineInsights">
+            生成离线洞察
+          </n-button>
+
+          <div v-if="offline.items.length" class="result">
+            <div v-for="(item, i) in offline.items" :key="i" class="insight-row">
+              <span class="insight-icon">{{ item.icon }}</span>
+              <div class="insight-body">
+                <div class="insight-title">{{ item.title }}</div>
+                <div class="insight-text">{{ item.body }}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </n-collapse-item>
+
       <!-- ① 任务拆解 -->
       <n-collapse-item title="① 任务拆解" name="split">
         <div class="panel">
@@ -143,8 +163,10 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { reactive, ref, computed } from 'vue'
 import { useMessage } from 'naive-ui'
+import { buildInsights } from '../api/localInsights'
+import { getPomodoroRecords } from '../utils/storage'
 import {
   buildSplitPrompt,
   buildSchedulePrompt,
@@ -173,6 +195,23 @@ const reasoningLines = computed(() =>
 
 const { tasks, ensureLoaded, addTask } = useTasks()
 const { today, week, total, last7Days, taskStats, load: loadStats } = useStats()
+
+// 离线洞察（Tier 1 本地规则引擎：即时计算，零网络）
+const offline = reactive({ loading: false, items: [] })
+
+async function runOfflineInsights() {
+  offline.loading = true
+  try {
+    await ensureLoaded()
+    const records = await getPomodoroRecords()
+    offline.items = buildInsights(records, tasks.value)
+    message.success('离线洞察已生成')
+  } catch {
+    message.error('洞察生成失败，请重试')
+  } finally {
+    offline.loading = false
+  }
+}
 
 /** 统一执行入口：loading → 调用 → 错误提示（AIError 消息已汉化；状态与结果由单例保管） */
 async function runAgentView(agent, prompt) {
@@ -465,6 +504,40 @@ function stateLabel(state) {
   font-size: 13px;
   color: var(--text-secondary);
   margin: 0;
+}
+
+/* 离线洞察卡片 */
+.insight-row {
+  display: flex;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px dashed var(--outline);
+}
+
+.insight-row:last-child {
+  border-bottom: none;
+}
+
+.insight-icon {
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+.insight-body {
+  flex: 1;
+}
+
+.insight-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.insight-text {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  margin-top: 2px;
 }
 
 .list-block {

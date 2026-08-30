@@ -150,3 +150,26 @@ export async function chatJSON(systemPrompt, userContent, { temperature = 0.3, o
 
   return extractJSON(content)
 }
+
+// ==================== Tier 2 预留：端侧模型接口 ====================
+
+/** 设备是否满足端侧模型运行条件（RAM ≥ 4GB；未知设备保守禁用） */
+export function canUseLocalModel() {
+  try {
+    const mem = navigator.deviceMemory // Chrome 系返回近似内存 GB 数
+    return typeof mem === 'number' ? mem >= 4 : false
+  } catch {
+    return false
+  }
+}
+
+/**
+ * 与 chatJSON 同构的本地模型接口（llama.cpp Rust 集成后启用）
+ * 当前为占位：明确报错而非静默失败，便于上层判断降级到离线洞察。
+ */
+export async function localChatJSON(systemPrompt, userContent, options = {}) {
+  if (!canUseLocalModel()) {
+    throw new AIError('当前设备不满足端侧模型运行条件', 'local_unsupported')
+  }
+  throw new AIError('端侧模型尚未启用，请使用云端 API 或离线洞察', 'local_not_ready')
+}

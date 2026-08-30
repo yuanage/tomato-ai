@@ -13,6 +13,7 @@ import { startOfDay, startOfWeek, isSameDay, weekdayLabel } from '../src/utils/d
 import { extractJSON, AIError } from '../src/api/ai'
 import { sortTasks, normalizeTaskInput } from '../src/composables/useTasks'
 import { sanitizeSavedState } from '../src/utils/aiState'
+import { buildInsights, bestFocusWindow, focusStreakDays, overloadTasks } from '../src/api/localInsights'
 import { mockResponse } from '../src/api/mock'
 
 let passed = 0
@@ -213,6 +214,54 @@ test('非对象 result 被丢弃', () => {
 test('非字符串 input 被丢弃', () => {
   const r = sanitizeSavedState({ focus: { input: 123 } })
   assert.equal(r.focus.input, '')
+})
+
+// ==================== localInsights 离线洞察 ====================
+section('localInsights.js 离线洞察引擎')
+
+const NOW = new Date(2026, 7, 17, 18, 0).getTime() // 2026-08-17 18:00（周一）
+const at = (dayOffset, hour) => new Date(2026, 7, 17 + dayOffset, hour, 0).getTime()
+
+test('最佳专注时段：取当日记录最多的2小时桶', () => {
+  const records = [
+    { completedAt: at(0, 9) },
+    { completedAt: at(0, 9) },
+    { completedAt: at(0, 10) },
+    { completedAt: at(0, 15) }
+  ]
+  const r = bestFocusWindow(records, NOW)
+  assert.equal(r.window, '08:00-10:00')
+  assert.ok(r.count >= 2)
+})
+
+test('无当日记录返回 null', () => {
+  assert.equal(bestFocusWindow([{ completedAt: at(-1, 9) }], NOW), null)
+})
+
+test('连续天数：今天有记录连续计数', () => {
+  const records = [{ completedAt: at(0, 9) }, { completedAt: at(-1, 9) }, { completedAt: at(-2, 9) }]
+  assert.equal(focusStreakDays(records, NOW), 3)
+})
+
+test('连续天数：今天没有则从昨天起算', () => {
+  const records = [{ completedAt: at(-1, 9) }, { completedAt: at(-2, 9) }]
+  assert.equal(focusStreakDays(records, NOW), 2)
+})
+
+test('超载任务：消耗超过预估且未完成', () => {
+  const tasks = [
+    { title: 'a', done: false, estPomodoros: 2, consumedPomodoros: 3 },
+    { title: 'b', done: true, estPomodoros: 1, consumedPomodoros: 5 },
+    { title: 'c', done: false, estPomodoros: 3, consumedPomodoros: 1 }
+  ]
+  assert.equal(overloadTasks(tasks).length, 1)
+})
+
+test('汇总洞察：包含今日总结且结构完整', () => {
+  const r = buildInsights([{ completedAt: at(0, 9) }], [{ title: 't', done: false }], NOW)
+  assert.ok(r.length > 0)
+  assert.ok(r.some((i) => i.title === '今日总结'))
+  for (const i of r) assert.ok(i.icon && i.title && i.body)
 })
 
 // ==================== mock.js ====================
