@@ -79,7 +79,8 @@ const SETTINGS_KEY = 'settings'
 const DEFAULT_SETTINGS = {
   pomodoroMinutes: 25, // 单次番茄时长（分钟）
   lastDurationMinutes: 25, // 上次使用的时长（专注页记忆）
-  vibrateOnComplete: true // 完成时震动提醒
+  vibrateOnComplete: true, // 完成时震动提醒
+  themeMode: 'light' // 主题：light（默认亮色）| dark
 }
 
 /** 读取设置（缺省项回落默认值） */

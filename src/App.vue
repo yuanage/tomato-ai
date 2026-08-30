@@ -33,29 +33,33 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { computed, watchEffect, onMounted } from 'vue'
 import { darkTheme } from 'naive-ui'
 import { useRoute } from 'vue-router'
+import { useSettings } from './composables/useSettings'
 
 const route = useRoute()
 
-// 暗色模式：跟随系统（NaiveUI 主题 + CSS 令牌双轨同步）
-const prefersDark = ref(false)
-let mediaQuery = null
+// 主题：设置页驱动（默认亮色，可切暗色）；CSS 令牌经 html.theme-dark 类同步
+const { settings, ensureLoaded: ensureSettingsLoaded } = useSettings()
+const isDark = computed(() => settings.value.themeMode === 'dark')
 
-function syncTheme(e) {
-  prefersDark.value = e.matches
-}
+// 同步 NaiveUI 主题
+const naiveTheme = computed(() => (isDark.value ? darkTheme : undefined))
 
-onMounted(() => {
-  mediaQuery = window.matchMedia('(prefers-color-scheme: dark)')
-  prefersDark.value = mediaQuery.matches
-  mediaQuery.addEventListener('change', syncTheme)
+// 同步 CSS 令牌类（html 根元素）
+watchEffect(() => {
+  document.documentElement.classList.toggle('theme-dark', isDark.value)
 })
 
-onUnmounted(() => mediaQuery?.removeEventListener('change', syncTheme))
-
-const naiveTheme = computed(() => (prefersDark.value ? darkTheme : undefined))
+// 启动时恢复用户的主题选择
+onMounted(async () => {
+  try {
+    await ensureSettingsLoaded()
+  } catch {
+    /* 读取失败：默认亮色 */
+  }
+})
 
 // 暗色下同步 NaiveUI 常用令牌（与 CSS 暗色令牌同源）
 const darkCommon = {
@@ -74,16 +78,16 @@ const darkCommon = {
 
 const themeOverrides = computed(() => ({
   common: {
-    ...(prefersDark.value ? darkCommon : {}),
-    primaryColor: prefersDark.value ? '#e04866' : '#d03050',
-    primaryColorHover: prefersDark.value ? '#ea6a83' : '#e04866',
-    primaryColorPressed: prefersDark.value ? '#c73a56' : '#b62a46',
-    primaryColorSuppl: prefersDark.value ? '#e04866' : '#d03050',
+    ...(isDark.value ? darkCommon : {}),
+    primaryColor: isDark.value ? '#e04866' : '#d03050',
+    primaryColorHover: isDark.value ? '#ea6a83' : '#e04866',
+    primaryColorPressed: isDark.value ? '#c73a56' : '#b62a46',
+    primaryColorSuppl: isDark.value ? '#e04866' : '#d03050',
     borderRadius: '10px',
     borderRadiusSmall: '8px',
     fontFamily:
       "'Roboto', 'Noto Sans SC', -apple-system, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif",
-    ...(prefersDark.value
+    ...(isDark.value
       ? {}
       : {
           textColorBase: '#1f1f1f',

@@ -18,6 +18,11 @@
         <n-switch v-model:value="vibrateOnComplete" @update:value="saveVibrate" />
         <div class="field-hint">番茄完成时震动 + 提示</div>
       </div>
+      <div class="field">
+        <div class="field-label">暗色主题</div>
+        <n-switch v-model:value="themeDark" @update:value="saveTheme" />
+        <div class="field-hint">默认亮色；切换立即生效并保存</div>
+      </div>
     </n-card>
 
     <!-- AI 配置 -->
@@ -94,6 +99,7 @@ const { settings, ensureLoaded, updateSettings } = useSettings()
 // ---------- 专注设置 ----------
 const pomodoroMinutes = ref(25)
 const vibrateOnComplete = ref(true)
+const themeDark = ref(false)
 
 // ---------- AI 配置 ----------
 const ai = ref({ baseURL: '', apiKey: '', model: '', useMock: true })
@@ -103,6 +109,7 @@ onMounted(async () => {
     await ensureLoaded()
     pomodoroMinutes.value = settings.value.pomodoroMinutes
     vibrateOnComplete.value = settings.value.vibrateOnComplete
+    themeDark.value = settings.value.themeMode === 'dark'
   } catch {
     /* 设置读取失败：沿用默认值 */
   }
@@ -119,6 +126,12 @@ function savePomodoroMinutes(v) {
 function saveVibrate(v) {
   updateSettings({ vibrateOnComplete: v })
   message.success(v ? '完成提醒已开启' : '完成提醒已关闭')
+}
+
+/** 【主题】暗色开关：即时持久化，App 壳实时响应 */
+function saveTheme(v) {
+  updateSettings({ themeMode: v ? 'dark' : 'light' })
+  message.success(v ? '已切换为暗色主题' : '已切换为亮色主题')
 }
 
 function saveAI() {

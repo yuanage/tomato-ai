@@ -6,7 +6,7 @@ import { getSettings, saveSettings as persistSettings } from '../utils/storage'
  * 设置页读写、计时器页订阅，共用同一份响应式状态。
  */
 
-const settings = ref({ pomodoroMinutes: 25, vibrateOnComplete: true })
+const settings = ref({ pomodoroMinutes: 25, lastDurationMinutes: 25, vibrateOnComplete: true, themeMode: 'light' })
 let loadPromise = null
 
 /** 确保设置已加载（共享 Promise：并发调用只读一次库） */

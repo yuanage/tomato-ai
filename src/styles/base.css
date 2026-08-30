@@ -56,23 +56,21 @@
     'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
 }
 
-/* 暗色模式：跟随系统（令牌整体覆盖，组件零改动） */
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #111314;
-    --surface: #1c1e20;
-    --surface-variant: #26282b;
-    --outline: #33363a;
-    --text-primary: #e8e8ea;
-    --text-secondary: #a8a8ae;
-    --text-tertiary: #7a7a80;
-    --primary: #e04866;
-    --primary-hover: #ea6a83;
-    --primary-pressed: #c73a56;
-    --primary-container: #4a1f2a;
-    --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.3), 0 2px 8px rgba(0, 0, 0, 0.25);
-    --shadow-2: 0 2px 6px rgba(0, 0, 0, 0.35), 0 8px 24px rgba(0, 0, 0, 0.3);
-  }
+/* 暗色模式：由设置页开关驱动（html 根元素挂 .theme-dark 类），默认亮色 */
+.theme-dark {
+  --bg: #111314;
+  --surface: #1c1e20;
+  --surface-variant: #26282b;
+  --outline: #33363a;
+  --text-primary: #e8e8ea;
+  --text-secondary: #a8a8ae;
+  --text-tertiary: #7a7a80;
+  --primary: #e04866;
+  --primary-hover: #ea6a83;
+  --primary-pressed: #c73a56;
+  --primary-container: #4a1f2a;
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.3), 0 2px 8px rgba(0, 0, 0, 0.25);
+  --shadow-2: 0 2px 6px rgba(0, 0, 0, 0.35), 0 8px 24px rgba(0, 0, 0, 0.3);
 }
 
 /* 无障碍：用户偏好减少动效时，全局禁用过渡与动画 */
