@@ -138,9 +138,11 @@ const navItems = [
 .app-main {
   flex: 1;
   overflow-y: auto;
-  padding: var(--space-4);
-  /* 底部留出导航栏高度 + 安卓手势条安全区域 */
-  padding-bottom: calc(80px + env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  /* 顶部安全区（刘海/状态栏）+ 呼吸空间；底部留出导航栏高度 */
+  padding: calc(var(--space-4) + env(safe-area-inset-top)) var(--space-4)
+    calc(80px + env(safe-area-inset-bottom));
 }
 
 /* Material 底部导航：白底 + 顶部细分隔阴影 */

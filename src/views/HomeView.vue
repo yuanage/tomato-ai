@@ -226,12 +226,14 @@ function persistDuration(minutes) {
 </script>
 
 <style scoped>
+/* 专注页垂直居中：高屏手机上计时器位于视觉中心，不堆在顶部；内容超高时可滚动 */
 .home {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 32px;
-  padding-top: 24px;
+  gap: 30px;
+  margin: auto 0;
+  padding: var(--space-3) 0;
 }
 
 /* 计时数字：Display 级字号，等宽数字防跳动 */
