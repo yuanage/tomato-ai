@@ -53,17 +53,23 @@
 <script setup>
 import { onMounted, onUnmounted } from 'vue'
 import { useStats } from '../composables/useStats'
+import { on as onEvent } from '../utils/events'
 
 const { loading, today, week, total, last7Days, taskStats, load } = useStats()
+
+let offPomodoro = null
 
 onMounted(() => {
   load()
   // 从后台切回时刷新统计（跨午夜、完成番茄后数据保持最新）
   document.addEventListener('visibilitychange', onVisible)
+  // 【联动】番茄完成事件 → 统计自动刷新（无需手动切页触发）
+  offPomodoro = onEvent('pomodoro:completed', () => load())
 })
 
 onUnmounted(() => {
   document.removeEventListener('visibilitychange', onVisible)
+  offPomodoro?.()
 })
 
 function onVisible() {
@@ -88,6 +94,13 @@ function barHeight(count) {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 12px;
+}
+
+/* 平板/桌面：四列一行 */
+@media (min-width: 768px) {
+  .stats-grid {
+    grid-template-columns: repeat(4, 1fr);
+  }
 }
 
 /* Material 卡片：大圆角 + 低阴影 */

@@ -11,6 +11,8 @@ import { genId, getTasks, saveTasks } from '../utils/storage'
  */
 
 const tasks = ref([])
+/** 跨模块快捷入口：任务页"开始专注"携带的任务 ID（专注页读取后清空） */
+export const pendingFocusTaskId = ref(null)
 let loadPromise = null
 
 /** 确保任务数据已加载（共享 Promise：并发调用只读一次库，避免旧数据覆盖内存修改） */
@@ -54,12 +56,22 @@ export async function addTask(title, estPomodoros = null) {
     pinned: false,
     pinnedAt: null,
     estPomodoros: input.estPomodoros,
+    consumedPomodoros: 0, // 已消耗番茄数（绑定任务完成番茄时累加）
     createdAt: Date.now(),
     completedAt: null
   }
   tasks.value.push(task)
   await persist()
   return task
+}
+
+/** 任务已消耗番茄数累加（绑定任务完成一个番茄时调用） */
+export async function incrementTaskPomodoros(id, n = 1) {
+  await ensureLoaded()
+  const t = tasks.value.find((x) => x.id === id)
+  if (!t) return
+  t.consumedPomodoros = (t.consumedPomodoros || 0) + n
+  await persist()
 }
 
 /** 切换完成状态 */

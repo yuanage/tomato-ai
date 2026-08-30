@@ -7,6 +7,17 @@
       <div v-if="state === 'completed'" class="done">🎉 完成！已记录到本地</div>
     </TimerRing>
 
+    <!-- 绑定任务（可选）：完成的番茄计入该任务 -->
+    <n-select
+      v-model:value="selectedTaskId"
+      :options="taskOptions"
+      clearable
+      size="small"
+      placeholder="绑定任务（可选），完成的番茄将计入该任务"
+      style="width: 100%; max-width: 300px"
+      :disabled="isRunning"
+    />
+
     <!-- 时长配置：25 / 45 / 60 分钟预设 + 自定义（1~180 分钟），计时中锁定 -->
     <div class="duration">
       <n-radio-group
@@ -79,12 +90,15 @@ import { ref, computed, watch, onMounted } from 'vue'
 import { useMessage } from 'naive-ui'
 import { usePomodoro } from '../composables/usePomodoro'
 import { useSettings } from '../composables/useSettings'
+import { useTasks, pendingFocusTaskId } from '../composables/useTasks'
 import { addPomodoroRecord } from '../utils/storage'
+import { on as onEvent, emit } from '../utils/events'
 import TimerRing from '../components/TimerRing.vue'
 
 const message = useMessage()
 
-const { settings, ensureLoaded: ensureSettingsLoaded } = useSettings()
+const { settings, ensureLoaded: ensureSettingsLoaded, updateSettings } = useSettings()
+const { tasks, ensureLoaded: ensureTasksLoaded, incrementTaskPomodoros } = useTasks()
 
 // 完成回调：落库 + 轻提示 + 震动（按设置开关）
 const {
@@ -113,16 +127,40 @@ const {
       .catch(() => {
         message.error('记录保存失败，请检查本地存储')
       })
+    // 【联动】绑定任务累加已消耗番茄数（失败仅提示）
+    if (selectedTaskId.value) {
+      incrementTaskPomodoros(selectedTaskId.value).catch(() => {
+        message.error('任务计数更新失败')
+      })
+    }
+    // 【联动】全局广播：统计页等模块自动刷新
+    emit('pomodoro:completed', record)
   }
 })
 
-// 挂载时应用设置里的番茄时长；设置页修改后实时同步（计时中不生效）
+// 挂载时：应用设置 + 恢复时长记忆 + 加载任务 + 接收"开始专注"快捷入口
 onMounted(async () => {
   try {
     await ensureSettingsLoaded()
     applySettings({ pomodoroMinutes: settings.value.pomodoroMinutes })
+    // 【联动】时长记忆：恢复上次使用的时长
+    const last = settings.value.lastDurationMinutes
+    if (last && last !== customMinutes.value) {
+      customMinutes.value = last
+      setDuration(last * 60)
+    }
   } catch {
     /* 设置读取失败：沿用默认值 */
+  }
+  try {
+    await ensureTasksLoaded()
+  } catch {
+    /* 任务读取失败：列表为空，可刷新重试 */
+  }
+  // 【联动】任务页"▶ 开始专注"快捷入口
+  if (pendingFocusTaskId.value) {
+    selectedTaskId.value = pendingFocusTaskId.value
+    pendingFocusTaskId.value = null
   }
 })
 
@@ -134,6 +172,15 @@ watch(
 )
 
 const isRunning = computed(() => state.value === 'running' || state.value === 'paused')
+
+// ---------- 任务绑定 ----------
+const selectedTaskId = ref(null)
+
+const taskOptions = computed(() =>
+  tasks.value
+    .filter((t) => !t.done)
+    .map((t) => ({ label: t.title, value: t.id }))
+)
 
 const statusText = computed(() => {
   const map = {
@@ -163,11 +210,18 @@ const activePreset = computed(() => {
 function applyPreset(minutes) {
   customMinutes.value = minutes
   setDuration(minutes * 60)
+  persistDuration(minutes)
 }
 
 function applyCustom(minutes) {
   if (!minutes) return
   setDuration(minutes * 60)
+  persistDuration(minutes)
+}
+
+/** 【联动】时长记忆：记住上次使用的时长，下次打开自动恢复 */
+function persistDuration(minutes) {
+  updateSettings({ lastDurationMinutes: minutes })
 }
 </script>
 
