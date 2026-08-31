@@ -1,11 +1,13 @@
 <template>
   <div class="home">
-    <!-- 进度环 + 时间 -->
-    <TimerRing :progress="progress">
-      <div class="time">{{ displayTime }}</div>
-      <div class="status">{{ statusText }}</div>
-      <div v-if="state === 'completed'" class="done">🎉 完成！已记录到本地</div>
-    </TimerRing>
+    <!-- 进度环 + 时间（完成时一次脉冲反馈） -->
+    <div class="ring-pulse" :class="{ pulse: justCompleted }">
+      <TimerRing :progress="progress">
+        <div class="time">{{ displayTime }}</div>
+        <div class="status">{{ statusText }}</div>
+        <div v-if="state === 'completed'" class="done">🎉 完成！已记录到本地</div>
+      </TimerRing>
+    </div>
 
     <!-- 绑定任务（可选）：完成的番茄计入该任务 -->
     <n-select
@@ -86,7 +88,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useMessage } from 'naive-ui'
 import { usePomodoro } from '../composables/usePomodoro'
 import { useSettings } from '../composables/useSettings'
@@ -96,6 +98,20 @@ import { on as onEvent, emit } from '../utils/events'
 import TimerRing from '../components/TimerRing.vue'
 
 const message = useMessage()
+
+// 【微动效】番茄完成时进度环一次脉冲（≤500ms，reduced-motion 下自动禁用）
+const justCompleted = ref(false)
+let pulseTimer = null
+
+function firePulse() {
+  justCompleted.value = true
+  clearTimeout(pulseTimer)
+  pulseTimer = setTimeout(() => {
+    justCompleted.value = false
+  }, 600)
+}
+
+onUnmounted(() => clearTimeout(pulseTimer))
 
 const { settings, ensureLoaded: ensureSettingsLoaded, updateSettings } = useSettings()
 const { tasks, ensureLoaded: ensureTasksLoaded, incrementTaskPomodoros } = useTasks()
@@ -114,6 +130,7 @@ const {
   applySettings
 } = usePomodoro({
   onComplete(record) {
+    firePulse() // 【微动效】完成脉冲（先于落库，反馈即时）
     // 落库（异常兜底：数据库失败不打断应用流程）
     addPomodoroRecord(record)
       .then(() => {
@@ -255,6 +272,38 @@ function persistDuration(minutes) {
   font-size: 13px;
   font-weight: 500;
   color: var(--primary);
+  animation: rise-in var(--motion-normal) var(--ease-standard);
+}
+
+/* 【微动效】完成脉冲 + 完成卡淡入上浮（reduced-motion 全局禁用） */
+.ring-pulse.pulse {
+  animation: ring-pulse 500ms var(--ease-standard);
+}
+
+@keyframes ring-pulse {
+  0% {
+    transform: scale(1);
+  }
+  35% {
+    transform: scale(1.04);
+  }
+  70% {
+    transform: scale(0.996);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
 .duration {

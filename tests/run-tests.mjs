@@ -264,6 +264,22 @@ test('汇总洞察：包含今日总结且结构完整', () => {
   for (const i of r) assert.ok(i.icon && i.title && i.body)
 })
 
+test('性能验收：2000条记录的7天聚合+洞察计算 <50ms', () => {
+  const records = []
+  for (let i = 0; i < 2000; i++) {
+    records.push({ completedAt: NOW - (i % 90) * 86400000 - (i % 24) * 3600000 })
+  }
+  const t0 = Date.now()
+  // 与 useStats.last7Days 相同的聚合逻辑
+  for (let i = 6; i >= 0; i--) {
+    const start = startOfDay(NOW - i * 86400000)
+    records.filter((r) => r.completedAt >= start && r.completedAt < start + 86400000)
+  }
+  buildInsights(records, [], NOW)
+  const elapsed = Date.now() - t0
+  assert.ok(elapsed < 50, `耗时 ${elapsed}ms，超出 50ms 预算`)
+})
+
 // ==================== mock.js ====================
 section('mock.js 四大 Agent 样例结构')
 
