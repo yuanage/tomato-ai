@@ -181,7 +181,7 @@ test('空/非法输入返回默认结构', () => {
   const d = sanitizeSavedState(null)
   assert.equal(d.split.result, null)
   assert.equal(d.split.input, '')
-  assert.equal(d.split.reasoning, '')
+  assert.equal(d.sched.result, null)
   assert.equal(d.review.result, null)
   assert.deepEqual(sanitizeSavedState('bad'), d)
 })
@@ -196,14 +196,11 @@ test('合法的 result 与 input 被保留', () => {
   assert.equal(r.review.result.summary, 'ok')
 })
 
-test('思考过程 reasoning 字符串被保留', () => {
-  const r = sanitizeSavedState({ split: { reasoning: '1. 解析\n2. 拆解' } })
-  assert.equal(r.split.reasoning, '1. 解析\n2. 拆解')
-})
-
-test('非字符串 reasoning 被丢弃', () => {
-  const r = sanitizeSavedState({ focus: { reasoning: 42 } })
-  assert.equal(r.focus.reasoning, '')
+test('遗留的 reasoning 字段被丢弃', () => {
+  const r = sanitizeSavedState({ split: { reasoning: '1. 解析\n2. 拆解' }, focus: { reasoning: 42 } })
+  assert.equal(r.split.reasoning, undefined)
+  assert.equal(r.focus.reasoning, undefined)
+  assert.equal(r.split.result, null)
 })
 
 test('非对象 result 被丢弃', () => {

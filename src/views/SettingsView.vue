@@ -56,6 +56,15 @@
       </div>
     </n-card>
 
+    <!-- AI 助手说明 -->
+    <n-card title="AI 助手说明" :bordered="false">
+      <ul class="ai-note">
+        <li>🔒 隐私：仅发送任务文本与统计摘要给模型，不保存任何隐私；数据全部留在本地</li>
+        <li>🧪 未配置 API Key 时为模拟模式，返回本地样例数据；在"AI 配置"填入 Key 并关闭模拟后即真实调用</li>
+        <li>💡 生成过程中切换页面不会中断：结果与输入会自动保存，返回后仍在</li>
+      </ul>
+    </n-card>
+
     <!-- 数据管理 -->
     <n-card title="数据管理" :bordered="false">
       <div class="field">
@@ -225,6 +234,22 @@ async function handleExportLogs() {
   display: flex;
   gap: 10px;
   margin-top: 8px;
+}
+
+/* AI 助手说明列表 */
+.ai-note {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ai-note li {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-secondary);
 }
 
 .about {

@@ -1,15 +1,5 @@
 <template>
   <div class="ai-page">
-    <!-- 隐私声明 + Mock 模式提示 -->
-    <p class="privacy">
-      🔒 仅发送任务文本与统计摘要给模型，不保存任何隐私；数据全部留在本地。
-    </p>
-    <n-alert v-if="isMock" type="info" :bordered="false" class="mock-tip">
-      当前为模拟模式（未配置真实 API Key），返回的是本地样例数据。可在 设置 → AI 配置 中填入 Key 并关闭模拟。
-    </n-alert>
-
-    <p class="hint-line">💡 生成过程中切换页面不会中断：结果与输入会自动保存，返回后仍在</p>
-
     <n-collapse :default-expanded-names="['split']" arrow-placement="right">
       <!-- ⓪ 离线洞察（Tier 1：零网络本地规则引擎） -->
       <n-collapse-item title="🏠 离线洞察（无需联网）" name="offline">
@@ -55,16 +45,6 @@
               <div class="result-title">🤖 AI 生成任务列表</div>
               <p v-if="restored" class="restored-hint">📂 已自动恢复上次的生成结果（切页/重启不丢失）</p>
               <div class="result-divider"></div>
-            </div>
-
-            <!-- AI 思考过程（默认折叠） -->
-            <div v-if="split.reasoning" class="reasoning-block">
-              <button class="reasoning-toggle" type="button" @click="showReasoning = !showReasoning">
-                🧠 AI 思考过程 {{ showReasoning ? '▲ 收起' : '▼ 展开' }}
-              </button>
-              <div v-show="showReasoning" class="reasoning-body">
-                <p v-for="(line, i) in reasoningLines" :key="i" class="reasoning-line">{{ line }}</p>
-              </div>
             </div>
 
             <div v-for="(t, i) in split.result.tasks || []" :key="i" class="result-row">
@@ -163,7 +143,7 @@
 </template>
 
 <script setup>
-import { reactive, ref, computed } from 'vue'
+import { reactive } from 'vue'
 import { useMessage } from 'naive-ui'
 import { buildInsights } from '../api/localInsights'
 import { getPomodoroRecords } from '../utils/storage'
@@ -182,16 +162,7 @@ import { useAiAgents } from '../composables/useAiAgents'
 const message = useMessage()
 
 // 单例状态：切换页面/刷新后结果与输入自动保留（见 useAiAgents）
-const { split, sched, review, focus, isMock, restored, runAgent } = useAiAgents()
-
-// 思考过程折叠面板（默认折叠）
-const showReasoning = ref(false)
-const reasoningLines = computed(() =>
-  String(split.reasoning || '')
-    .split(/\n+/)
-    .map((l) => l.trim())
-    .filter(Boolean)
-)
+const { split, sched, review, focus, restored, runAgent } = useAiAgents()
 
 const { tasks, ensureLoaded, addTask } = useTasks()
 const { today, week, total, last7Days, taskStats, load: loadStats } = useStats()
@@ -351,22 +322,6 @@ function stateLabel(state) {
   gap: 12px;
 }
 
-.privacy {
-  font-size: 12px;
-  color: var(--text-tertiary);
-  margin: 0;
-}
-
-.mock-tip {
-  font-size: 12px;
-}
-
-.hint-line {
-  font-size: 12px;
-  color: var(--text-secondary);
-  margin: 0;
-}
-
 .btn-row {
   display: flex;
   align-items: center;
@@ -417,46 +372,6 @@ function stateLabel(state) {
   font-size: 12px;
   color: var(--text-tertiary);
   margin: 0;
-}
-
-/* AI 思考过程折叠面板 */
-.reasoning-block {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.reasoning-toggle {
-  align-self: flex-start;
-  background: none;
-  border: 1px solid var(--outline);
-  border-radius: var(--radius-s);
-  padding: 4px 10px;
-  font-size: 12px;
-  color: var(--text-secondary);
-  cursor: pointer;
-}
-
-.reasoning-body {
-  background: var(--surface-variant);
-  border-radius: var(--radius-s);
-  padding: 10px 12px;
-}
-
-.reasoning-line {
-  font-size: 12px;
-  color: var(--text-secondary);
-  line-height: 1.7;
-  margin: 0 0 4px;
-  padding-left: 10px;
-  position: relative;
-}
-
-.reasoning-line::before {
-  content: '·';
-  position: absolute;
-  left: 2px;
-  color: var(--text-tertiary);
 }
 
 .result-row {
