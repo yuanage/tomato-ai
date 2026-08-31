@@ -47,7 +47,9 @@
             title="开始专注此任务"
             :disabled="task.done"
             @click="startFocusFor(task.id)"
-          >▶</n-button>
+          >
+            <i class="act-icon" :style="actStyle(actPlay)"></i>
+          </n-button>
           <n-button
             quaternary
             size="tiny"
@@ -55,8 +57,12 @@
             :class="{ pinned: task.pinned }"
             :title="task.pinned ? '取消置顶' : '置顶'"
             @click="togglePin(task.id)"
-          >📌</n-button>
-          <n-button quaternary size="tiny" title="编辑" @click="openEdit(task)">✏️</n-button>
+          >
+            <i class="act-icon" :style="actStyle(actPin)"></i>
+          </n-button>
+          <n-button quaternary size="tiny" title="编辑" @click="openEdit(task)">
+            <i class="act-icon" :style="actStyle(actPencil)"></i>
+          </n-button>
           <n-popconfirm
             positive-text="删除"
             negative-text="取消"
@@ -64,7 +70,9 @@
             @positive-click="handleRemove(task.id)"
           >
             <template #trigger>
-              <n-button quaternary size="tiny" title="删除" type="error">🗑️</n-button>
+              <n-button quaternary size="tiny" title="删除" type="error">
+                <i class="act-icon" :style="actStyle(actTrash)"></i>
+              </n-button>
             </template>
             确定删除「{{ task.title }}」？
           </n-popconfirm>
@@ -112,6 +120,18 @@ import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useMessage } from 'naive-ui'
 import { useTasks, pendingFocusTaskId } from '../composables/useTasks'
+import actPlay from '../assets/icons/act-play.png'
+import actPin from '../assets/icons/act-pin.png'
+import actPencil from '../assets/icons/act-pencil.png'
+import actTrash from '../assets/icons/act-trash.png'
+
+// 蒙版图标：颜色跟随按钮文字色（删除钮 error 色自动生效）
+function actStyle(url) {
+  return {
+    WebkitMaskImage: `url(${url})`,
+    maskImage: `url(${url})`
+  }
+}
 
 const message = useMessage()
 const router = useRouter()
@@ -252,6 +272,20 @@ async function handleSaveEdit() {
   display: flex;
   gap: 2px;
   flex-shrink: 0;
+}
+
+/* 蒙版操作图标：颜色跟随按钮文字色（置顶/删除状态色自动生效） */
+.act-icon {
+  display: inline-block;
+  width: 15px;
+  height: 15px;
+  background-color: currentColor;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-size: contain;
+  mask-size: contain;
 }
 
 /* 置顶按钮：未置顶弱化、置顶后强调色 */

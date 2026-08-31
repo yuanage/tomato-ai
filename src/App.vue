@@ -22,7 +22,16 @@
               class="nav-item"
               :class="{ active: route.path === item.path }"
             >
-              <span class="nav-icon">{{ item.icon }}</span>
+              <span class="nav-icon">
+                <i
+                  class="glyph glyph-filled"
+                  :style="glyphStyle(item, 'filled')"
+                ></i>
+                <i
+                  class="glyph glyph-outline"
+                  :style="glyphStyle(item, 'outline')"
+                ></i>
+              </span>
               <span class="nav-label">{{ item.label }}</span>
             </router-link>
           </nav>
@@ -37,6 +46,16 @@ import { computed, watchEffect, onMounted } from 'vue'
 import { darkTheme } from 'naive-ui'
 import { useRoute } from 'vue-router'
 import { useSettings } from './composables/useSettings'
+import navFocusFilled from './assets/icons/nav-focus-filled.png'
+import navFocusOutline from './assets/icons/nav-focus-outline.png'
+import navTaskFilled from './assets/icons/nav-task-filled.png'
+import navTaskOutline from './assets/icons/nav-task-outline.png'
+import navStatsFilled from './assets/icons/nav-stats-filled.png'
+import navStatsOutline from './assets/icons/nav-stats-outline.png'
+import navAiFilled from './assets/icons/nav-ai-filled.png'
+import navAiOutline from './assets/icons/nav-ai-outline.png'
+import navSettingsFilled from './assets/icons/nav-settings-filled.png'
+import navSettingsOutline from './assets/icons/nav-settings-outline.png'
 
 const route = useRoute()
 
@@ -108,14 +127,31 @@ const themeOverrides = computed(() => ({
   Input: { borderRadius: '10px' }
 }))
 
-// 5 个一级页面，与路由一一对应
+// 5 个一级页面，与路由一一对应；图标用生成的 SF Symbols 风格 PNG 蒙版（选中=填充红 / 未选中=描边灰）
+const navGlyphs = {
+  focus: { filled: navFocusFilled, outline: navFocusOutline },
+  task: { filled: navTaskFilled, outline: navTaskOutline },
+  stats: { filled: navStatsFilled, outline: navStatsOutline },
+  ai: { filled: navAiFilled, outline: navAiOutline },
+  settings: { filled: navSettingsFilled, outline: navSettingsOutline }
+}
+
 const navItems = [
-  { path: '/', label: '专注', icon: '🍅' },
-  { path: '/tasks', label: '任务', icon: '📋' },
-  { path: '/stats', label: '统计', icon: '📊' },
-  { path: '/ai', label: 'AI助手', icon: '🤖' },
-  { path: '/settings', label: '设置', icon: '⚙️' }
+  { path: '/', label: '专注', key: 'focus' },
+  { path: '/tasks', label: '任务', key: 'task' },
+  { path: '/stats', label: '统计', key: 'stats' },
+  { path: '/ai', label: 'AI助手', key: 'ai' },
+  { path: '/settings', label: '设置', key: 'settings' }
 ]
+
+// 蒙版图标：颜色跟随 currentColor（激活=主题红，未激活=导航灰）
+function glyphStyle(item, variant) {
+  const url = navGlyphs[item.key][variant]
+  return {
+    WebkitMaskImage: `url(${url})`,
+    maskImage: `url(${url})`
+  }
+}
 </script>
 
 <style scoped>
@@ -183,10 +219,34 @@ const navItems = [
   width: 44px;
   height: 28px;
   border-radius: 14px;
-  font-size: 17px;
   line-height: 1;
   transition: background-color var(--motion-normal) var(--ease-standard),
     transform var(--motion-fast) var(--ease-standard);
+}
+
+/* 蒙版字形：颜色取当前文字色，选中态切换填充/描边两版 */
+.glyph {
+  width: 22px;
+  height: 22px;
+  background-color: currentColor;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-size: contain;
+  mask-size: contain;
+}
+
+.glyph-filled {
+  display: none;
+}
+
+.nav-item.active .glyph-filled {
+  display: block;
+}
+
+.nav-item.active .glyph-outline {
+  display: none;
 }
 
 .nav-item.active .nav-icon {
