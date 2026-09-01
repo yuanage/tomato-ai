@@ -61,8 +61,14 @@ export async function addTask(title, estPomodoros = null) {
     completedAt: null
   }
   tasks.value.push(task)
-  await persist()
-  return task
+  try {
+    await persist()
+    return task
+  } catch (e) {
+    // 双通道落库都失败：回滚内存，避免"界面有、磁盘无"的幽灵任务
+    tasks.value = tasks.value.filter((t) => t.id !== task.id)
+    throw e
+  }
 }
 
 /** 任务已消耗番茄数累加（绑定任务完成一个番茄时调用） */

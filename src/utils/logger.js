@@ -10,7 +10,7 @@ const LOG_KEY = 'error_logs'
 const MAX_LOGS = 200
 
 /** 追加一条错误日志（内部捕获失败静默） */
-async function pushLog(entry) {
+export async function pushLog(entry) {
   try {
     const list = await getLogs()
     list.push(entry)

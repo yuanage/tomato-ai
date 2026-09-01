@@ -153,12 +153,18 @@ function startFocusFor(id) {
 // ---------- 新增 ----------
 const draftTitle = ref('')
 
-function handleAdd(e) {
+async function handleAdd(e) {
   // 拦截中文输入法选字时的回车（isComposing 为 true 时不提交）
   if (e?.isComposing) return
   const title = draftTitle.value.trim()
   if (!title) return
-  addTask(title)
+  try {
+    // await 落库完成再清空输入：杀进程前写入已提交，杜绝"添加了却丢了"
+    await addTask(title)
+  } catch {
+    message.error('保存失败，请重试')
+    return
+  }
   draftTitle.value = ''
 }
 

@@ -15,13 +15,31 @@ import { sortTasks, normalizeTaskInput } from '../src/composables/useTasks'
 import { sanitizeSavedState } from '../src/utils/aiState'
 import { buildInsights, bestFocusWindow, focusStreakDays, overloadTasks } from '../src/api/localInsights'
 import { mockResponse } from '../src/api/mock'
+import { createDualStore } from '../src/utils/storage'
 
 let passed = 0
 let failed = 0
+/** 异步用例的 Promise 列表：汇总前统一等待，失败也能被计入 */
+const pendingTests = []
 
 function test(name, fn) {
   try {
-    fn()
+    const r = fn()
+    if (r && typeof r.then === 'function') {
+      pendingTests.push(
+        r.then(
+          () => {
+            passed++
+            console.log('  ✓', name)
+          },
+          (e) => {
+            failed++
+            console.error('  ✗', name, '→', e.message || e)
+          }
+        )
+      )
+      return
+    }
     passed++
     console.log('  ✓', name)
   } catch (e) {
@@ -308,6 +326,139 @@ test('focus 返回状态诊断字段', async () => {
   assert.ok(typeof r.analysis === 'string' && typeof r.advice === 'string')
 })
 
+// ==================== storage.js 双写持久化核心 ====================
+section('storage.js createDualStore 双写/恢复逻辑')
+
+/** 内存版双后端：可模拟 IndexedDB 宕机 */
+function makeFake() {
+  const idb = new Map()
+  const fs = new Map()
+  let idbBroken = false
+  const store = createDualStore({
+    idbGet: async (k) => {
+      if (idbBroken) throw new Error('idb down')
+      return idb.has(k) ? idb.get(k) : null
+    },
+    idbSet: async (k, v) => {
+      if (idbBroken) throw new Error('idb down')
+      idb.set(k, v)
+    },
+    idbRemove: async (k) => {
+      if (idbBroken) throw new Error('idb down')
+      idb.delete(k)
+    },
+    fsGet: async (k) => (fs.has(k) ? JSON.parse(fs.get(k)) : null),
+    fsSet: async (k, v) => fs.set(k, JSON.stringify(v)),
+    fsRemove: async (k) => fs.delete(k)
+  })
+  return { idb, fs, store, breakIdb: () => { idbBroken = true } }
+}
+
+test('写入：两侧都落一份，文件镜像为信封格式', async () => {
+  const { idb, fs, store } = makeFake()
+  await store.write('tasks', [{ id: 1 }])
+  assert.deepEqual(idb.get('tasks'), [{ id: 1 }])
+  const env = JSON.parse(fs.get('tasks'))
+  assert.equal(env.v, 1)
+  assert.deepEqual(env.data, [{ id: 1 }])
+  assert.ok(typeof env.savedAt === 'number' && env.savedAt > 0)
+})
+
+test('写入：单侧失败静默，另一侧仍可用', async () => {
+  const { store, fs } = makeFake()
+  const half = createDualStore({
+    idbGet: async () => null,
+    idbSet: async () => {},
+    idbRemove: async () => {},
+    fsGet: async () => null,
+    fsSet: async () => {
+      throw new Error('fs down')
+    },
+    fsRemove: async () => {}
+  })
+  await half.write('tasks', [1]) // 不抛：IndexedDB 成功即视为已持久化
+  const ok = makeFake()
+  await ok.store.write('tasks', [1])
+  assert.deepEqual(ok.idb.get('tasks'), [1])
+})
+
+test('写入：两侧都失败才抛错', async () => {
+  const broken = createDualStore({
+    idbGet: async () => null,
+    idbSet: async () => {
+      throw new Error('idb down')
+    },
+    idbRemove: async () => {},
+    fsGet: async () => null,
+    fsSet: async () => {
+      throw new Error('fs down')
+    },
+    fsRemove: async () => {}
+  })
+  await assert.rejects(() => broken.write('tasks', [1]))
+})
+
+test('读取：IndexedDB 有数据时优先并刷新镜像', async () => {
+  const { idb, fs, store } = makeFake()
+  idb.set('tasks', [{ id: 1 }])
+  const r = await store.read('tasks', null)
+  assert.deepEqual(r, [{ id: 1 }])
+  assert.ok(fs.has('tasks')) // 镜像被刷新
+  assert.deepEqual(JSON.parse(fs.get('tasks')).data, [{ id: 1 }])
+})
+
+test('读取：IndexedDB 丢失时从镜像恢复并回写', async () => {
+  const { idb, fs, store } = makeFake()
+  fs.set('tasks', JSON.stringify({ v: 1, savedAt: 1, data: [{ id: 9 }] }))
+  const r = await store.read('tasks', null)
+  assert.deepEqual(r, [{ id: 9 }])
+  assert.deepEqual(idb.get('tasks'), [{ id: 9 }]) // 回写 IndexedDB
+})
+
+test('读取：IndexedDB 报错时回退镜像（进程被杀后存储损坏的场景）', async () => {
+  const { idb, fs, store, breakIdb } = makeFake()
+  idb.set('tasks', [{ stale: true }])
+  fs.set('tasks', JSON.stringify({ v: 1, savedAt: 2, data: [{ id: 9 }] }))
+  breakIdb() // 模拟 IndexedDB 宕机
+  const r = await store.read('tasks', null)
+  assert.deepEqual(r, [{ id: 9 }])
+})
+
+test('读取：兼容早期无信封的镜像文件', async () => {
+  const { fs, store } = makeFake()
+  fs.set('tasks', JSON.stringify([{ id: 5 }]))
+  assert.deepEqual(await store.read('tasks', null), [{ id: 5 }])
+})
+
+test('读取：两侧都无数据返回 fallback', async () => {
+  const { store } = makeFake()
+  assert.equal(await store.read('tasks', null), null)
+})
+
+test('删除：两侧都清除', async () => {
+  const { idb, fs, store } = makeFake()
+  idb.set('tasks', [1])
+  fs.set('tasks', JSON.stringify({ v: 1, savedAt: 1, data: [1] }))
+  await store.remove('tasks')
+  assert.equal(idb.has('tasks'), false)
+  assert.equal(fs.has('tasks'), false)
+})
+
+test('写队列：串行执行，单次失败不阻断后续写入', async () => {
+  const { store } = makeFake()
+  const order = []
+  await store.write('tasks', [1])
+  store.enqueue(async () => order.push('a'))
+  store.enqueue(async () => {
+    throw new Error('boom')
+  })
+  store.enqueue(async () => order.push('b'))
+  await store.flush()
+  assert.deepEqual(order, ['a', 'b']) // 中间失败不影响后面的任务
+})
+
 // ==================== 汇总 ====================
-console.log(`\n结果：${passed} 通过，${failed} 失败`)
-process.exitCode = failed > 0 ? 1 : 0
+Promise.all(pendingTests).then(() => {
+  console.log(`\n结果：${passed} 通过，${failed} 失败`)
+  process.exitCode = failed > 0 ? 1 : 0
+})
