@@ -11,7 +11,7 @@ const DEFAULTS = {
   baseURL: 'https://api.openai.com/v1', // OpenAI 兼容地址，可换 DeepSeek / 通义 等
   apiKey: '', // 例如 sk-xxxx
   model: 'gpt-4o-mini',
-  timeoutMs: 30000,
+  timeoutMs: 60000, // 推理模型响应偏慢，60s 兜底
   useMock: true
 }
 

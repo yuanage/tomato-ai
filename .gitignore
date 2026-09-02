@@ -13,3 +13,17 @@ android-wrapper/build
 # unplugin 自动生成的类型声明文件（首次 dev/build 时自动重新生成）
 src/auto-imports.d.ts
 src/components.d.ts
+
+# Rust 构建产物
+src-tauri/target/
+
+# APK 发布包
+交付/
+*.apk
+
+# 日志
+*.log
+
+# Python 缓存
+__pycache__/
+*.pyc
