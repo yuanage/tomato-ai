@@ -82,6 +82,13 @@
         </n-popconfirm>
       </div>
       <div class="field">
+        <div class="field-label">存储自检</div>
+        <n-button quaternary :loading="checkingStorage" @click="handleStorageCheck">
+          检测本地数据通道
+        </n-button>
+        <div class="field-hint">验证 IndexedDB 与文件镜像读写链路（探针写完即删，不影响数据）</div>
+      </div>
+      <div class="field">
         <div class="field-label">错误日志</div>
         <n-button quaternary @click="handleExportLogs">导出错误日志</n-button>
         <div class="field-hint">测试期问题定位用；运行时错误自动记录在本地</div>
@@ -99,7 +106,7 @@ import { useSettings } from '../composables/useSettings'
 import { getAIConfig, saveAIConfig } from '../api/config'
 import { chatJSON } from '../api/ai'
 import { clearAllTasks } from '../composables/useTasks'
-import { clearPomodoroRecords } from '../utils/storage'
+import { clearPomodoroRecords, runStorageSelfCheck } from '../utils/storage'
 import { getLogs } from '../utils/logger'
 
 const message = useMessage()
@@ -178,6 +185,30 @@ async function clearAll() {
   await clearAllTasks()
   await clearPomodoroRecords()
   message.success('本地数据已清空')
+}
+
+// ---------- 存储自检 ----------
+const checkingStorage = ref(false)
+async function handleStorageCheck() {
+  checkingStorage.value = true
+  try {
+    const r = await runStorageSelfCheck()
+    const idb = r.idbOk ? '✅ 正常' : '❌ 异常'
+    const fs = r.fsOk === true ? '✅ 正常' : r.fsOk === 'skip' ? '⊘ 未启用（网页预览）' : '❌ 异常'
+    const fsEnv = r.fsEnvelopeOk === true ? '（信封格式正确）' : r.fsEnvelopeOk === 'skip' ? '' : '（信封异常）'
+    const msg = `IndexedDB ${idb}；文件镜像 ${fs}${fsEnv}`
+    if (r.errors.length) {
+      message.error(msg + `｜${r.errors.join('；')}`)
+    } else if (!r.idbOk || r.fsOk === false) {
+      message.error(msg)
+    } else {
+      message.success(msg)
+    }
+  } catch (e) {
+    message.error('自检失败：' + (e.message || e))
+  } finally {
+    checkingStorage.value = false
+  }
 }
 
 /** 导出错误日志（下载 JSON 文件，测试问题定位用） */

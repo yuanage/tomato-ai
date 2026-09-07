@@ -329,22 +329,27 @@ test('focus 返回状态诊断字段', async () => {
 // ==================== storage.js 双写持久化核心 ====================
 section('storage.js createDualStore 双写/恢复逻辑')
 
-/** 内存版双后端：可模拟 IndexedDB 宕机 */
-function makeFake() {
+/** 内存版双后端：可模拟 IndexedDB 宕机或永久挂起；idbTimeoutMs 注入超时保护 */
+function makeFake({ hang = false, idbTimeoutMs = 0 } = {}) {
   const idb = new Map()
   const fs = new Map()
   let idbBroken = false
+  const hangOp = () => new Promise(() => {}) // 永不 resolve/reject，模拟 leveldb 损坏卡死
   const store = createDualStore({
+    idbTimeoutMs,
     idbGet: async (k) => {
       if (idbBroken) throw new Error('idb down')
+      if (hang) return hangOp()
       return idb.has(k) ? idb.get(k) : null
     },
     idbSet: async (k, v) => {
       if (idbBroken) throw new Error('idb down')
+      if (hang) return hangOp()
       idb.set(k, v)
     },
     idbRemove: async (k) => {
       if (idbBroken) throw new Error('idb down')
+      if (hang) return hangOp()
       idb.delete(k)
     },
     fsGet: async (k) => (fs.has(k) ? JSON.parse(fs.get(k)) : null),
@@ -455,6 +460,43 @@ test('写队列：串行执行，单次失败不阻断后续写入', async () =>
   store.enqueue(async () => order.push('b'))
   await store.flush()
   assert.deepEqual(order, ['a', 'b']) // 中间失败不影响后面的任务
+})
+
+test('读取：IndexedDB 永久挂起时超时降级到镜像（损坏卡死场景）', async () => {
+  const { fs, store } = makeFake({ hang: true, idbTimeoutMs: 30 })
+  fs.set('tasks', JSON.stringify({ v: 1, savedAt: 1, data: [{ id: 7 }] }))
+  const started = Date.now()
+  const r = await store.read('tasks', null)
+  assert.deepEqual(r, [{ id: 7 }]) // 从镜像恢复
+  assert.ok(Date.now() - started < 2000) // 未被挂起卡死
+})
+
+test('写入：IndexedDB 永久挂起时超时不卡死，文件镜像成功即视为已持久化', async () => {
+  const { fs, store } = makeFake({ hang: true, idbTimeoutMs: 30 })
+  await store.write('tasks', [{ id: 3 }]) // 不抛、不卡死
+  const env = JSON.parse(fs.get('tasks'))
+  assert.deepEqual(env.data, [{ id: 3 }]) // 镜像侧已落盘
+})
+
+test('删除：IndexedDB 永久挂起时超时后仍清除镜像侧', async () => {
+  const { fs, store } = makeFake({ hang: true, idbTimeoutMs: 30 })
+  fs.set('tasks', JSON.stringify({ v: 1, savedAt: 1, data: [1] }))
+  await store.remove('tasks')
+  assert.equal(fs.has('tasks'), false)
+})
+
+test('序列化：中文与 emoji 内容经 JSON 双通道往返无损', async () => {
+  const { idb, fs, store } = makeFake()
+  const payload = [
+    { id: 'a', title: '准备产品发布会 🍅 番茄工作法', done: false, createdAt: 1735000000000 },
+    { id: 'b', title: '写周报：完成度 50%（含引号 " 与换行\n 测试）', done: true }
+  ]
+  await store.write('tasks', payload)
+  // 双通道各自经真实 JSON.stringify/parse 往返
+  assert.deepEqual(JSON.parse(JSON.stringify(idb.get('tasks'))), payload)
+  assert.deepEqual(JSON.parse(fs.get('tasks')).data, payload)
+  const readBack = await store.read('tasks', null)
+  assert.deepEqual(readBack, payload)
 })
 
 // ==================== 汇总 ====================

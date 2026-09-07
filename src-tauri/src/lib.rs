@@ -3,7 +3,14 @@ use std::path::PathBuf;
 use tauri::Manager;
 
 /// 允许镜像到文件的存储键白名单（杜绝路径注入）
-const FS_ALLOWED_KEYS: [&str; 4] = ["tasks", "pomodoro_records", "settings", "ai_agent_state"];
+const FS_ALLOWED_KEYS: [&str; 6] = [
+  "tasks",
+  "pomodoro_records",
+  "settings",
+  "ai_agent_state",
+  "ai_config",
+  "__selfcheck__", // 存储自检探针键
+];
 
 fn data_file(app: &tauri::AppHandle, key: &str) -> Result<PathBuf, String> {
   if !FS_ALLOWED_KEYS.contains(&key) {
