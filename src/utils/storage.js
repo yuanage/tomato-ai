@@ -1,6 +1,7 @@
 import localforage from 'localforage'
 import { invoke } from '@tauri-apps/api/core'
 import { pushLog } from './logger'
+import { emit } from './events'
 
 /**
  * 本地存储统一入口：localForage（IndexedDB）+ Tauri 文件镜像 双写
@@ -32,26 +33,48 @@ export function genId() {
 
 // ==================== 双写核心（可注入，便于单元测试） ====================
 
-/** 文件镜像信封：{ v: 1, savedAt, data }（savedAt 供审计与未来合并决策；v 便于格式演进） */
+/** 数据信封：{ v: 1, savedAt, data }（savedAt 供新鲜度比较，v 便于格式演进） */
 function wrap(value) {
   return { v: 1, savedAt: Date.now(), data: value }
 }
 
-/** 解信封：兼容早期无信封的镜像文件（整体即数据） */
-function unwrap(parsed) {
-  if (parsed && typeof parsed === 'object' && parsed.v === 1 && 'data' in parsed) {
-    return parsed.data
+/** 解析单侧读回值 → { data, savedAt, legacy }；旧格式（无信封）标记 legacy 供迁移决策 */
+export function parseSide(raw) {
+  if (raw === null || raw === undefined) return { data: null, savedAt: null, legacy: false }
+  if (raw && typeof raw === 'object' && raw.v === 1 && 'data' in raw && 'savedAt' in raw) {
+    return { data: raw.data, savedAt: raw.savedAt, legacy: false }
   }
-  return parsed
+  return { data: raw, savedAt: null, legacy: true }
 }
 
-/** 双写存储核心（纯逻辑，后端可注入）：
- * - write：两侧并行落盘，仅当两侧都失败才抛错（单侧失败静默，另一侧仍可用）；
- * - read：IndexedDB 优先并顺带刷新镜像；IndexedDB 为空/报错时从镜像恢复并回写；
+/**
+ * 双通道比较选新（纯函数，便于测试）：
+ * - 两侧都是信封 → savedAt 新者胜；相同取先者（IndexedDB）；
+ * - 信封 + 遗留（旧版原始值）→ 遗留方胜：遗留数据可能含旧版本最后一次写入
+ *   （旧版曾出现单侧写入失败，时间戳不可考），优先保护它；
+ * - 两侧都是遗留 → 取先者（IndexedDB）。
+ */
+export function chooseSide(a, b) {
+  const aEnv = !a.legacy
+  const bEnv = !b.legacy
+  if (aEnv && bEnv) {
+    if (a.savedAt !== b.savedAt) return a.savedAt > b.savedAt ? a : b
+    return a
+  }
+  if (aEnv !== bEnv) return a.legacy ? a : b
+  return a
+}
+
+/**
+ * 双写存储核心（纯逻辑，后端可注入）：
+ * - write：两侧并行写信封，仅当两侧都失败才抛错；恰一侧失败经 onPartialFailure(side) 上报；
+ * - read：并行读两侧 → savedAt 比较取新者（含旧格式迁移规则）→
+ *   缺失/输家一侧由赢家数据后台修复，格式收敛为信封（杜绝"文件优先读到旧数据覆盖新数据"）；
  * - remove：两侧清除；
  * - 写队列：全部写操作串行执行（enqueue），flush() 可等待队列排空；
  * - idbTimeoutMs > 0：IndexedDB 操作加超时保护（进程被杀后 leveldb 损坏可能挂起，
- *   超时即视为该侧不可用，读走镜像、写由镜像兜底，避免整个应用卡死）。 */
+ *   超时即视为该侧不可用，由另一侧兜底，避免整个应用卡死）。
+ */
 export function createDualStore({
   idbGet,
   idbSet,
@@ -59,7 +82,8 @@ export function createDualStore({
   fsGet,
   fsSet,
   fsRemove,
-  idbTimeoutMs = 0
+  idbTimeoutMs = 0,
+  onPartialFailure = null
 }) {
   let queue = Promise.resolve()
 
@@ -75,45 +99,64 @@ export function createDualStore({
     return idbTimeoutMs > 0 ? withTimeout(p, idbTimeoutMs) : p
   }
 
+  /** 单侧修复写入（走队列，失败静默——另一侧仍可用） */
+  const repair = (task) => {
+    enqueue(() => task().catch(() => {}))
+  }
+
   return {
     enqueue,
-    /** 双写：仅当 IndexedDB 与文件镜像都失败（含超时）时抛错。
-     * IndexedDB 存原始数据（兼容早期版本）；文件镜像存信封 {v, savedAt, data} */
+    /** 双写：信封同时落两侧；仅当两侧都失败（含超时）时抛错 */
     async write(key, value) {
       await enqueue(async () => {
+        const envelope = wrap(value)
         const results = await Promise.allSettled([
-          guardIdb(() => idbSet(key, value)),
-          fsSet(key, wrap(value))
+          guardIdb(() => idbSet(key, envelope)),
+          fsSet(key, envelope)
         ])
         if (results.every((r) => r.status === 'rejected')) {
           throw new Error(`本地存储写入失败（双通道均不可用）：${key}`)
         }
+        if (results[0].status === 'rejected' && results[1].status === 'fulfilled') {
+          onPartialFailure?.('idb')
+        } else if (results[0].status === 'fulfilled' && results[1].status === 'rejected') {
+          onPartialFailure?.('fs')
+        }
       })
     },
-    /** 双读：IndexedDB 优先；缺失/报错/超时从镜像恢复；镜像刷新与回写走队列后台执行 */
+    /** 双读：并行取两侧，信封比较取新者；缺失方/输家由赢家后台修复 */
     async read(key, fallback) {
-      let idbValue = null
+      let idbRaw = null
+      let fsRaw = null
       try {
-        idbValue = await guardIdb(() => idbGet(key))
+        idbRaw = await guardIdb(() => idbGet(key))
       } catch {
-        idbValue = null
+        idbRaw = null
+        onPartialFailure?.('idb')
       }
-      if (idbValue !== null && idbValue !== undefined) {
-        enqueue(() => fsSet(key, wrap(idbValue))) // 顺带刷新镜像（不阻塞读取）
-        return idbValue
-      }
-      let backup = null
       try {
-        backup = await fsGet(key)
+        fsRaw = await fsGet(key)
       } catch {
-        backup = null
+        fsRaw = null
+        onPartialFailure?.('fs')
       }
-      if (backup !== null && backup !== undefined) {
-        const data = unwrap(backup)
-        enqueue(() => guardIdb(() => idbSet(key, data))) // 回写 IndexedDB（不阻塞读取）
-        return data
+      const idbSide = parseSide(idbRaw)
+      const fsSide = parseSide(fsRaw)
+      const hasIdb = idbSide.data !== null
+      const hasFs = fsSide.data !== null
+      if (!hasIdb && !hasFs) return fallback
+      if (hasIdb && hasFs) {
+        const winner = chooseSide(idbSide, fsSide)
+        if (winner === idbSide) repair(() => fsSet(key, wrap(idbSide.data)))
+        else repair(() => guardIdb(() => idbSet(key, wrap(fsSide.data))))
+        return winner.data
       }
-      return fallback
+      if (hasIdb) {
+        repair(() => fsSet(key, wrap(idbSide.data))) // 镜像缺失/损坏：回填
+        return idbSide.data
+      }
+      repair(() => guardIdb(() => idbSet(key, wrap(fsSide.data)))) // IndexedDB 丢失：恢复回写
+      return fsSide.data
     },
     /** 删除（清空本地数据时双通道同步清除） */
     async remove(key) {
@@ -180,7 +223,21 @@ async function fsRemove(key) {
   }
 }
 
-/** 应用级双写实例：IndexedDB（localforage，3s 超时保护）+ 文件镜像（Tauri 原生命令） */
+/** 应用级双写实例：IndexedDB（localforage，3s 超时保护）+ 文件镜像（Tauri 原生命令）。
+ * 单侧失败不再静默：经 storage:issue 事件通知界面（节流 60s，避免刷屏）。 */
+let lastIssueAt = 0
+
+function notifyIssue(msg) {
+  const now = Date.now()
+  if (now - lastIssueAt < 60000) return
+  lastIssueAt = now
+  try {
+    emit('storage:issue', msg)
+  } catch {
+    /* 无监听者时静默 */
+  }
+}
+
 const dual = createDualStore({
   idbGet: (key) => localforage.getItem(key),
   idbSet: (key, value) => localforage.setItem(key, value),
@@ -188,7 +245,17 @@ const dual = createDualStore({
   fsGet,
   fsSet,
   fsRemove,
-  idbTimeoutMs: 3000
+  idbTimeoutMs: 3000,
+  onPartialFailure(side) {
+    // 文件通道失败仅在 Tauri 环境提示（网页预览本就没有该通道）；
+    // IndexedDB 失败任何环境都提示（网页环境它是唯一通道）。
+    if (side === 'fs' && !IS_TAURI) return
+    const msg =
+      side === 'fs'
+        ? '文件备份通道写入失败，数据当前只保存在 IndexedDB（进程被杀后可能丢失）。请到 设置→数据管理→检测本地数据通道 排查'
+        : 'IndexedDB 通道异常，已改用文件备份通道读写（功能不受影响）。请到 设置→数据管理→检测本地数据通道 排查'
+    notifyIssue(msg)
+  }
 })
 
 // ==================== 后台清理优化：生命周期冲刷 ====================

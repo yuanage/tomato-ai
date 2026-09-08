@@ -15,7 +15,7 @@ import { sortTasks, normalizeTaskInput } from '../src/composables/useTasks'
 import { sanitizeSavedState } from '../src/utils/aiState'
 import { buildInsights, bestFocusWindow, focusStreakDays, overloadTasks } from '../src/api/localInsights'
 import { mockResponse } from '../src/api/mock'
-import { createDualStore } from '../src/utils/storage'
+import { createDualStore, chooseSide, parseSide } from '../src/utils/storage'
 
 let passed = 0
 let failed = 0
@@ -329,14 +329,15 @@ test('focus 返回状态诊断字段', async () => {
 // ==================== storage.js 双写持久化核心 ====================
 section('storage.js createDualStore 双写/恢复逻辑')
 
-/** 内存版双后端：可模拟 IndexedDB 宕机或永久挂起；idbTimeoutMs 注入超时保护 */
-function makeFake({ hang = false, idbTimeoutMs = 0 } = {}) {
+/** 内存版双后端：可模拟 IndexedDB 宕机或永久挂起；idbTimeoutMs 注入超时保护；onPartialFailure 观察单侧失败 */
+function makeFake({ hang = false, idbTimeoutMs = 0, onPartialFailure = null } = {}) {
   const idb = new Map()
   const fs = new Map()
   let idbBroken = false
   const hangOp = () => new Promise(() => {}) // 永不 resolve/reject，模拟 leveldb 损坏卡死
   const store = createDualStore({
     idbTimeoutMs,
+    onPartialFailure,
     idbGet: async (k) => {
       if (idbBroken) throw new Error('idb down')
       if (hang) return hangOp()
@@ -359,18 +360,32 @@ function makeFake({ hang = false, idbTimeoutMs = 0 } = {}) {
   return { idb, fs, store, breakIdb: () => { idbBroken = true } }
 }
 
-test('写入：两侧都落一份，文件镜像为信封格式', async () => {
+/** 信封数据读取辅助：断言某侧信封内的 data（兼容 fs 侧 JSON 字符串存储） */
+function envData(map, key) {
+  let raw = map.get(key)
+  if (raw === undefined) raw = null
+  if (typeof raw === 'string') {
+    try {
+      raw = JSON.parse(raw)
+    } catch {
+      raw = null
+    }
+  }
+  return parseSide(raw).data
+}
+
+test('写入：两侧都落一份，均为信封格式', async () => {
   const { idb, fs, store } = makeFake()
   await store.write('tasks', [{ id: 1 }])
-  assert.deepEqual(idb.get('tasks'), [{ id: 1 }])
-  const env = JSON.parse(fs.get('tasks'))
-  assert.equal(env.v, 1)
-  assert.deepEqual(env.data, [{ id: 1 }])
-  assert.ok(typeof env.savedAt === 'number' && env.savedAt > 0)
+  for (const raw of [idb.get('tasks'), JSON.parse(fs.get('tasks'))]) {
+    assert.equal(raw.v, 1)
+    assert.deepEqual(raw.data, [{ id: 1 }])
+    assert.ok(typeof raw.savedAt === 'number' && raw.savedAt > 0)
+  }
 })
 
-test('写入：单侧失败静默，另一侧仍可用', async () => {
-  const { store, fs } = makeFake()
+test('写入：单侧失败经 onPartialFailure 上报，另一侧仍可用', async () => {
+  const reported = []
   const half = createDualStore({
     idbGet: async () => null,
     idbSet: async () => {},
@@ -379,12 +394,14 @@ test('写入：单侧失败静默，另一侧仍可用', async () => {
     fsSet: async () => {
       throw new Error('fs down')
     },
-    fsRemove: async () => {}
+    fsRemove: async () => {},
+    onPartialFailure: (side) => reported.push(side)
   })
   await half.write('tasks', [1]) // 不抛：IndexedDB 成功即视为已持久化
+  assert.deepEqual(reported, ['fs']) // 文件侧失败已上报，不再静默
   const ok = makeFake()
   await ok.store.write('tasks', [1])
-  assert.deepEqual(ok.idb.get('tasks'), [1])
+  assert.deepEqual(envData(ok.idb, 'tasks'), [1]) // IndexedDB 侧信封数据
 })
 
 test('写入：两侧都失败才抛错', async () => {
@@ -403,12 +420,13 @@ test('写入：两侧都失败才抛错', async () => {
   await assert.rejects(() => broken.write('tasks', [1]))
 })
 
-test('读取：IndexedDB 有数据时优先并刷新镜像', async () => {
+test('读取：IndexedDB 有数据（旧版遗留格式）时优先并刷新镜像', async () => {
   const { idb, fs, store } = makeFake()
-  idb.set('tasks', [{ id: 1 }])
+  idb.set('tasks', [{ id: 1 }]) // 旧版原始格式
   const r = await store.read('tasks', null)
   assert.deepEqual(r, [{ id: 1 }])
-  assert.ok(fs.has('tasks')) // 镜像被刷新
+  await store.flush() // 等待后台修复
+  assert.ok(fs.has('tasks')) // 镜像被回填为信封
   assert.deepEqual(JSON.parse(fs.get('tasks')).data, [{ id: 1 }])
 })
 
@@ -417,16 +435,36 @@ test('读取：IndexedDB 丢失时从镜像恢复并回写', async () => {
   fs.set('tasks', JSON.stringify({ v: 1, savedAt: 1, data: [{ id: 9 }] }))
   const r = await store.read('tasks', null)
   assert.deepEqual(r, [{ id: 9 }])
-  assert.deepEqual(idb.get('tasks'), [{ id: 9 }]) // 回写 IndexedDB
+  await store.flush()
+  assert.deepEqual(envData(idb, 'tasks'), [{ id: 9 }]) // 回写 IndexedDB（信封格式）
 })
 
 test('读取：IndexedDB 报错时回退镜像（进程被杀后存储损坏的场景）', async () => {
-  const { idb, fs, store, breakIdb } = makeFake()
-  idb.set('tasks', [{ stale: true }])
+  const { fs, store, breakIdb } = makeFake()
   fs.set('tasks', JSON.stringify({ v: 1, savedAt: 2, data: [{ id: 9 }] }))
   breakIdb() // 模拟 IndexedDB 宕机
   const r = await store.read('tasks', null)
   assert.deepEqual(r, [{ id: 9 }])
+})
+
+test('读取：文件镜像较新时取镜像并回修 IndexedDB（防文件优先读到旧数据）', async () => {
+  const { idb, fs, store } = makeFake()
+  idb.set('tasks', { v: 1, savedAt: 100, data: [{ id: 'old' }] })
+  fs.set('tasks', JSON.stringify({ v: 1, savedAt: 200, data: [{ id: 'new' }] }))
+  const r = await store.read('tasks', null)
+  assert.deepEqual(r, [{ id: 'new' }]) // 取新者
+  await store.flush()
+  assert.deepEqual(envData(idb, 'tasks'), [{ id: 'new' }]) // IndexedDB 被修复为较新数据
+})
+
+test('读取：升级场景遗留 IndexedDB 数据胜于信封镜像（保护旧版最后一次写入）', async () => {
+  const { idb, fs, store } = makeFake()
+  idb.set('tasks', [{ id: 'legacy-newest' }]) // v0.1.8 遗留：可能是最后一次成功写入
+  fs.set('tasks', JSON.stringify({ v: 1, savedAt: 999999999, data: [{ id: 'fs-older' }] }))
+  const r = await store.read('tasks', null)
+  assert.deepEqual(r, [{ id: 'legacy-newest' }]) // 遗留方胜
+  await store.flush()
+  assert.deepEqual(envData(fs, 'tasks'), [{ id: 'legacy-newest' }]) // 镜像收敛为遗留数据
 })
 
 test('读取：兼容早期无信封的镜像文件', async () => {
@@ -442,11 +480,33 @@ test('读取：两侧都无数据返回 fallback', async () => {
 
 test('删除：两侧都清除', async () => {
   const { idb, fs, store } = makeFake()
-  idb.set('tasks', [1])
+  idb.set('tasks', { v: 1, savedAt: 1, data: [1] })
   fs.set('tasks', JSON.stringify({ v: 1, savedAt: 1, data: [1] }))
   await store.remove('tasks')
   assert.equal(idb.has('tasks'), false)
   assert.equal(fs.has('tasks'), false)
+})
+
+test('chooseSide：信封取 savedAt 新者，相同时取先者', () => {
+  const oldSide = parseSide({ v: 1, savedAt: 100, data: [1] })
+  const newSide = parseSide({ v: 1, savedAt: 200, data: [2] })
+  assert.equal(chooseSide(oldSide, newSide), newSide)
+  assert.equal(chooseSide(newSide, oldSide), newSide)
+  assert.equal(chooseSide(oldSide, parseSide({ v: 1, savedAt: 100, data: [1] })), oldSide)
+})
+
+test('chooseSide：遗留与信封混合时遗留方胜（保护升级前最新写入）', () => {
+  const legacy = parseSide([{ id: 'x' }]) // 无信封 → legacy
+  const env = parseSide({ v: 1, savedAt: 999999999, data: [{ id: 'y' }] })
+  assert.equal(legacy.legacy, true)
+  assert.equal(chooseSide(env, legacy), legacy)
+  assert.equal(chooseSide(legacy, env), legacy)
+})
+
+test('chooseSide：两侧都遗留时取先者（IndexedDB）', () => {
+  const a = parseSide([1])
+  const b = parseSide([2])
+  assert.equal(chooseSide(a, b), a)
 })
 
 test('写队列：串行执行，单次失败不阻断后续写入', async () => {
@@ -492,8 +552,8 @@ test('序列化：中文与 emoji 内容经 JSON 双通道往返无损', async (
     { id: 'b', title: '写周报：完成度 50%（含引号 " 与换行\n 测试）', done: true }
   ]
   await store.write('tasks', payload)
-  // 双通道各自经真实 JSON.stringify/parse 往返
-  assert.deepEqual(JSON.parse(JSON.stringify(idb.get('tasks'))), payload)
+  // 双通道各自经真实 JSON.stringify/parse 往返，信封内数据一致
+  assert.deepEqual(JSON.parse(JSON.stringify(idb.get('tasks'))).data, payload)
   assert.deepEqual(JSON.parse(fs.get('tasks')).data, payload)
   const readBack = await store.read('tasks', null)
   assert.deepEqual(readBack, payload)

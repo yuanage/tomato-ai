@@ -3,6 +3,8 @@
   <n-config-provider :theme="naiveTheme" :theme-overrides="themeOverrides">
     <n-message-provider>
       <n-dialog-provider>
+        <!-- 存储通道告警提示（需在 provider 内部才能用 useMessage） -->
+        <StorageIssueToaster />
         <div class="app-shell">
           <!-- 主内容区：路由出口（150ms 淡入淡出，reduced-motion 时自动禁用） -->
           <main class="app-main">
@@ -46,6 +48,7 @@ import { computed, watchEffect, onMounted } from 'vue'
 import { darkTheme } from 'naive-ui'
 import { useRoute } from 'vue-router'
 import { useSettings } from './composables/useSettings'
+import StorageIssueToaster from './components/StorageIssueToaster.vue'
 import navFocusFilled from './assets/icons/nav-focus-filled.png'
 import navFocusOutline from './assets/icons/nav-focus-outline.png'
 import navTaskFilled from './assets/icons/nav-task-filled.png'
