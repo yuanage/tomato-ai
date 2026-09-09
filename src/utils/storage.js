@@ -227,7 +227,10 @@ async function fsRemove(key) {
 }
 
 /** 应用级双写实例：IndexedDB（localforage，3s 超时保护）+ 文件镜像（Tauri 原生命令）。
- * 单侧失败不再静默：经 storage:issue 事件通知界面（节流 60s，避免刷屏）。 */
+ * 单侧瞬时失败属设计内自愈场景（另一侧正常落盘 → 读取时自动修复），不再弹提示打扰用户；
+ * 只保留两条真正的故障出口：① 双通道全失败 → 写入抛错，业务层按操作提示
+ * （如"保存失败，请重试"）；② 启动自检重试耗尽仍不健康 → notifyIssue 一次性提示。
+ * 细节一律记入错误日志（设置页可导出）。 */
 let lastIssueAt = 0
 
 function notifyIssue(msg) {
@@ -250,14 +253,12 @@ const dual = createDualStore({
   fsRemove,
   idbTimeoutMs: 3000,
   onPartialFailure(side) {
-    // 文件通道失败仅在 Tauri 环境提示（网页预览本就没有该通道）；
-    // IndexedDB 失败任何环境都提示（网页环境它是唯一通道）。
-    if (side === 'fs' && !IS_TAURI) return
-    const msg =
-      side === 'fs'
-        ? '文件备份通道写入失败，数据当前只保存在 IndexedDB（进程被杀后可能丢失）。请到 设置→数据管理→检测本地数据通道 排查'
-        : 'IndexedDB 通道异常，已改用文件备份通道读写（功能不受影响）。请到 设置→数据管理→检测本地数据通道 排查'
-    notifyIssue(msg)
+    // 仅记日志（不打扰界面）：单侧失败会被读取时的自动修复收敛
+    pushLog({
+      at: Date.now(),
+      type: 'storage-partial',
+      msg: `${side === 'fs' ? '文件' : 'IndexedDB'}通道瞬时失败（已由另一侧兜底，读取时自动修复）`
+    })
   }
 })
 
