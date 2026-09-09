@@ -1,15 +1,24 @@
 <template>
   <div class="schedule-page">
-    <!-- 顶栏：周导航 + 学期设置 -->
+    <!-- 顶栏（WakeUp 式大标题 + 周导航 + 导入/设置） -->
+    <div class="sched-topbar">
+      <div>
+        <div class="top-title">第 {{ viewWeek }} 周 <span class="top-dow">周{{ dowChar }}</span></div>
+        <div class="top-date">{{ todayFull }}</div>
+      </div>
+      <div class="top-actions">
+        <button class="icon-btn" type="button" title="导入 / 分享课表" @click="openImport">⤓</button>
+        <button class="icon-btn" type="button" title="学期设置" @click="openMeta">⚙</button>
+      </div>
+    </div>
+
     <div class="sched-toolbar">
       <button class="week-btn" type="button" :disabled="viewWeek <= 1" @click="shiftWeek(-1)">‹</button>
       <div class="week-mid" role="button" @click="gotoCurrentWeek">
-        <div class="week-no">第 {{ viewWeek }} 周</div>
         <div class="week-range">{{ weekRangeLabel(viewWeek, meta.semesterStart, meta.totalWeeks) }}</div>
       </div>
       <button class="week-btn" type="button" :disabled="viewWeek >= meta.totalWeeks" @click="shiftWeek(1)">›</button>
       <button class="today-btn" type="button" @click="gotoCurrentWeek">今天</button>
-      <button class="gear-btn" type="button" title="学期设置" @click="openMeta">⚙</button>
     </div>
 
     <!-- 课表：表头 + 主体（全天节次常显，对标 WakeUp：左侧节次时间、实色课程块白字） -->
@@ -23,11 +32,11 @@
       </div>
 
       <div class="sched-body">
-        <!-- 节次时间列：全天节次常显（含真实时间） -->
+        <!-- 节次时间列：全天节次常显（节次序号 + 开始时间，对标 WakeUp 左列） -->
         <div class="time-col">
           <div v-for="sec in fullSections" :key="'t' + sec.index" class="time-cell">
+            <span class="t-num">{{ sec.index }}</span>
             <span class="t-start">{{ sec.start }}</span>
-            <span class="t-end">{{ sec.end }}</span>
           </div>
         </div>
         <!-- 星期列：背景节次线 + 课程块 -->
@@ -47,7 +56,7 @@
             @click="openEdit(c)"
           >
             <div class="course-name">{{ c.name }}</div>
-            <div v-if="c.location" class="course-loc">{{ c.location }}</div>
+            <div v-if="c.location" class="course-loc">@{{ c.location }}</div>
             <div v-if="c.teacher" class="course-teacher">{{ c.teacher }}</div>
           </div>
         </div>
@@ -77,9 +86,18 @@
         </div>
         <div class="field-row">
           <span class="f-label">星期</span>
-          <n-radio-group v-model:value="form.dayOfWeek" size="small">
-            <n-radio-button v-for="d in 7" :key="d" :value="d">周{{ '一二三四五六日'[d - 1] }}</n-radio-button>
-          </n-radio-group>
+          <div class="day-picks">
+            <button
+              v-for="d in 7"
+              :key="d"
+              type="button"
+              class="day-pick"
+              :class="{ on: form.dayOfWeek === d }"
+              @click="form.dayOfWeek = d"
+            >
+              {{ '一二三四五六日'[d - 1] }}
+            </button>
+          </div>
         </div>
         <div class="field-row">
           <span class="f-label">节次</span>
@@ -157,6 +175,53 @@
       </template>
     </n-modal>
 
+    <!-- 导入 / 分享课表弹窗（纯本地：HTML 教务表格粘贴 或 TA1 分享口令，不上传） -->
+    <n-modal
+      v-model:show="importShow"
+      preset="card"
+      title="导入 / 分享课表"
+      :bordered="false"
+      style="width: 330px"
+    >
+      <div class="form">
+        <div class="field-row">
+          <n-button size="small" quaternary @click="genShare">生成分享口令（一键复制）</n-button>
+          <span class="meta-hint">同学粘贴 TA1: 口令即可导入你的课表</span>
+        </div>
+        <n-input
+          v-model:value="importText"
+          type="textarea"
+          :rows="7"
+          placeholder="粘贴教务系统课表 HTML 或 TA1: 分享口令"
+        />
+        <div class="btn-row">
+          <n-button size="small" @click="clearImportText">清空</n-button>
+          <n-button
+            size="small"
+            type="primary"
+            :disabled="!importText.trim()"
+            :loading="importParsing"
+            @click="previewImport"
+          >
+            解析预览
+          </n-button>
+        </div>
+        <div v-if="importPreview" class="import-result">
+          <div class="import-count">
+            可导入 {{ importPreview.items.length }} 门课程
+            <span v-if="importPreview.skipped > 0">（跳过无效 {{ importPreview.skipped }} 条）</span>
+          </div>
+          <div v-for="(c, i) in importPreview.items.slice(0, 5)" :key="i" class="import-line">
+            {{ c.name }} · 周{{ '一二三四五六日'[c.dayOfWeek - 1] }} 第{{ c.startSection }}-{{ c.endSection }}节
+          </div>
+          <div v-if="importPreview.items.length > 5" class="import-more">
+            另有 {{ importPreview.items.length - 5 }} 门…
+          </div>
+          <n-button type="primary" @click="confirmImport">确认导入</n-button>
+        </div>
+      </div>
+    </n-modal>
+
     <!-- 学期设置弹窗 -->
     <n-modal
       v-model:show="metaModalShow"
@@ -223,6 +288,13 @@ import {
   normalizeSections,
   findConflicts
 } from '../utils/schedule'
+import {
+  sniffImport,
+  parseHtmlColumns,
+  decodeShare,
+  encodeShare,
+  sanitizeImport
+} from '../utils/importSchedule'
 import { useSchedule } from '../composables/useSchedule'
 
 const message = useMessage()
@@ -249,6 +321,14 @@ const todayDow = new Date().getDay() === 0 ? 7 : new Date().getDay()
 function gotoCurrentWeek() {
   viewWeek.value = Math.min(currentWeek.value, meta.value.totalWeeks)
 }
+
+/** 顶部大标题：周几字符与今天完整日期（WakeUp 式） */
+const dowChar = '一二三四五六日'[todayDow - 1]
+const todayFull = (() => {
+  const d = new Date()
+  const p = (n) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}/${p(d.getMonth() + 1)}/${p(d.getDate())}`
+})()
 
 function shiftWeek(delta) {
   const next = viewWeek.value + delta
@@ -385,6 +465,78 @@ async function handleDelete() {
   }
 }
 
+// ---------- 导入 / 分享 ----------
+const importShow = ref(false)
+const importText = ref('')
+const importParsing = ref(false)
+const importPreview = ref(null) // { items, skipped }
+
+function openImport() {
+  importShow.value = true
+  importPreview.value = null
+}
+
+function clearImportText() {
+  importText.value = ''
+  importPreview.value = null
+}
+
+function previewImport() {
+  importParsing.value = true
+  try {
+    const kind = sniffImport(importText.value)
+    if (kind === 'unknown') {
+      message.error('未识别内容：请粘贴教务课表 HTML，或以 TA1: 开头的分享口令')
+      importPreview.value = null
+      return
+    }
+    const rawItems = kind === 'share' ? decodeShare(importText.value) : parseHtmlColumns(importText.value)
+    if (!rawItems || !rawItems.length) {
+      message.error('未解析到课程，请检查粘贴内容')
+      importPreview.value = null
+      return
+    }
+    const valid = sanitizeImport(rawItems, COURSE_COLORS)
+    if (!valid.length) {
+      message.error('未识别出有效课程（需包含课程名/星期）')
+      importPreview.value = null
+      return
+    }
+    importPreview.value = { items: valid, skipped: rawItems.length - valid.length }
+  } finally {
+    importParsing.value = false
+  }
+}
+
+async function confirmImport() {
+  if (!importPreview.value) return
+  let ok = 0
+  for (const c of importPreview.value.items) {
+    try {
+      await addCourse(c)
+      ok++
+    } catch {
+      /* 单条失败跳过 */
+    }
+  }
+  message.success(`已导入 ${ok} 门课程到课表`)
+  importShow.value = false
+  importPreview.value = null
+  importText.value = ''
+}
+
+async function genShare() {
+  try {
+    const share = encodeShare(courses.value)
+    await navigator.clipboard.writeText(share)
+    message.success('分享口令已复制，发送给同学粘贴导入即可')
+  } catch {
+    importShow.value = true
+    importText.value = encodeShare(courses.value)
+    message.error('自动复制失败，口令已填入输入框，请手动复制')
+  }
+}
+
 // ---------- 学期设置（P1：起始日/总周数/隐藏周末/节次时间自定义） ----------
 const metaModalShow = ref(false)
 const metaForm = ref({ startTs: Date.now(), totalWeeks: 20, showWeekend: true, sections: [] })
@@ -449,7 +601,53 @@ watch(meta, () => {
   gap: 10px;
 }
 
-/* 顶栏 */
+/* 顶栏（WakeUp 式大标题） */
+.sched-topbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 2px 2px 0;
+}
+
+.top-title {
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--text-primary);
+  line-height: 1.2;
+}
+
+.top-dow {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--primary);
+  margin-left: 4px;
+}
+
+.top-date {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  margin-top: 2px;
+  font-variant-numeric: tabular-nums;
+}
+
+.top-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.icon-btn {
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--outline);
+  background: var(--surface);
+  border-radius: 50%;
+  color: var(--text-secondary);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+/* 周导航 */
 .sched-toolbar {
   display: flex;
   align-items: center;
@@ -479,12 +677,6 @@ watch(meta, () => {
   text-align: center;
   cursor: pointer;
   user-select: none;
-}
-
-.week-no {
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--text-primary);
 }
 
 .week-range {
@@ -568,19 +760,19 @@ watch(meta, () => {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 1px;
+  gap: 2px;
   border-bottom: 1px solid var(--outline);
 }
 
-.t-start {
-  font-size: 11px;
-  font-weight: 600;
+.t-num {
+  font-size: 12px;
+  font-weight: 700;
   color: var(--text-secondary);
   font-variant-numeric: tabular-nums;
 }
 
-.t-end {
-  font-size: 9px;
+.t-start {
+  font-size: 10px;
   color: var(--text-tertiary);
   font-variant-numeric: tabular-nums;
 }
@@ -783,5 +975,58 @@ watch(meta, () => {
 .sections-editor + .field-row,
 .conflict-alert {
   margin-top: 2px;
+}
+
+/* 星期自绘按钮组（7 枚可控换行，避免撑破弹窗） */
+.day-picks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.day-pick {
+  width: 32px;
+  height: 30px;
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-s);
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 0;
+}
+
+.day-pick.on {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
+}
+
+/* 导入预览 */
+.import-result {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border-top: 1px dashed var(--outline);
+  padding-top: 8px;
+}
+
+.import-count {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.import-line {
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.import-more {
+  font-size: 11px;
+  color: var(--text-tertiary);
 }
 </style>

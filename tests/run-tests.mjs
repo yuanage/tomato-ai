@@ -29,6 +29,16 @@ import {
   findConflicts,
   COURSE_COLORS
 } from '../src/utils/schedule'
+import {
+  parseWeekRule,
+  parseSectionRange,
+  parseDayOfWeek,
+  parseHtmlColumns,
+  encodeShare,
+  decodeShare,
+  sniffImport,
+  sanitizeImport
+} from '../src/utils/importSchedule'
 
 let passed = 0
 let failed = 0
@@ -672,6 +682,80 @@ test('findConflicts：同日 + 节次重叠 + 周次相交才冲突', () => {
   // 不同天不冲突
   const r5 = findConflicts({ ...base, dayOfWeek: 2 }, list, 20)
   assert.deepEqual(r5, [])
+})
+
+// ==================== importSchedule.js 课表导入/导出 ====================
+section('importSchedule.js 导入解析/分享口令')
+
+test('parseWeekRule：连续/单双/自定义周次', () => {
+  assert.equal(parseWeekRule('1-16周').type, 'every')
+  assert.deepEqual(parseWeekRule('1-8(单)'), { type: 'odd', weeks: [1, 3, 5, 7] })
+  assert.deepEqual(parseWeekRule('1-8双'), { type: 'even', weeks: [2, 4, 6, 8] })
+  assert.deepEqual(parseWeekRule('3,5,7'), { type: 'custom', weeks: [3, 5, 7] })
+  assert.deepEqual(parseWeekRule('1-3,9-10'), { type: 'custom', weeks: [1, 2, 3, 9, 10] })
+  assert.deepEqual(parseWeekRule(''), { type: 'every', weeks: [] })
+})
+
+test('parseSectionRange / parseDayOfWeek：常见表述', () => {
+  assert.deepEqual(parseSectionRange('1-2'), { startSection: 1, endSection: 2 })
+  assert.deepEqual(parseSectionRange('3,4节'), { startSection: 3, endSection: 4 })
+  assert.equal(parseSectionRange(''), null)
+  assert.equal(parseDayOfWeek('周一'), 1)
+  assert.equal(parseDayOfWeek('星期四'), 4)
+  assert.equal(parseDayOfWeek('日'), 7)
+  assert.equal(parseDayOfWeek('周六'), 6)
+  assert.equal(parseDayOfWeek('随便'), null)
+})
+
+test('parseHtmlColumns：列式课表表格解析', () => {
+  const html = `
+  <table>
+    <tr><th>课程名称</th><th>教师</th><th>上课地点</th><th>星期</th><th>节次</th><th>周次</th></tr>
+    <tr><td>大学高数</td><td>李明</td><td>南104</td><td>周一</td><td>1-2</td><td>1-16周</td></tr>
+    <tr><td>体育3</td><td>王强</td><td>田径场</td><td>周三</td><td>5-6</td><td>1-8(单)</td></tr>
+    <tr><td></td><td>赵</td><td>无</td><td>周五</td><td>7-8</td><td>1-16周</td></tr>
+  </table>`
+  const list = parseHtmlColumns(html)
+  assert.ok(list && list.length === 2, '缺少名称/星期的行被跳过')
+  assert.equal(list[0].name, '大学高数')
+  assert.equal(list[0].location, '南104')
+  assert.equal(list[0].dayOfWeek, 1)
+  assert.deepEqual(list[0].weekRule, { type: 'every', weeks: [] })
+  assert.equal(list[1].weekRule.type, 'odd')
+  assert.deepEqual(list[1].weekRule.weeks, [1, 3, 5, 7])
+})
+
+test('parseHtmlColumns：无表格/列头不匹配返回 null', () => {
+  assert.equal(parseHtmlColumns('普通文本'), null)
+  assert.equal(parseHtmlColumns('<table><tr><td>a</td><td>b</td></tr></table>'), null)
+})
+
+test('分享口令：encode/decode 往返无损（含中文与 emoji）', () => {
+  const courses = [{ name: '离散数学 🎓', dayOfWeek: 3, startSection: 1, endSection: 2, weekRule: { type: 'odd', weeks: [1, 3] } }]
+  const share = encodeShare(courses)
+  assert.ok(share.startsWith('TA1:'))
+  const back = decodeShare(share)
+  assert.equal(back.length, 1)
+  assert.equal(back[0].name, '离散数学 🎓')
+  assert.deepEqual(back[0].weekRule, { type: 'odd', weeks: [1, 3] })
+  assert.equal(decodeShare('错误内容'), null)
+})
+
+test('sniffImport：识别 html / 口令 / 未知', () => {
+  assert.equal(sniffImport('<table><tr>x</tr></table>'), 'html')
+  assert.equal(sniffImport('TA1:abc'), 'share')
+  assert.equal(sniffImport('随便写点什么'), 'unknown')
+})
+
+test('sanitizeImport：过滤无效条目', () => {
+  const list = [
+    { name: '课程A', dayOfWeek: 3, startSection: 1, endSection: 2 },
+    { name: 'x', dayOfWeek: 3, startSection: 1, endSection: 2 }, // 名称太短
+    { name: '课程B', dayOfWeek: 9, startSection: 1, endSection: 2 } // 星期非法
+  ]
+  const valid = sanitizeImport(list, COURSE_COLORS)
+  assert.equal(valid.length, 1)
+  assert.equal(valid[0].name, '课程A')
 })
 
 // ==================== 汇总 ====================
