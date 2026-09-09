@@ -93,9 +93,59 @@ export function fmtDate(ts) {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
 }
 
-/** 缺省学期元数据：学期起始 = 本周一，共 20 周 */
+/** 缺省学期元数据：学期起始 = 本周一，共 20 周，显示周末，节次用内置表 */
 export function defaultMeta() {
-  return { semesterStart: fmtDate(mondayOf(Date.now())), totalWeeks: 20 }
+  return { semesterStart: fmtDate(mondayOf(Date.now())), totalWeeks: 20, showWeekend: true }
+}
+
+/** 生效节次表：meta.sections 合法（HH:mm 时间）则用之，否则回退内置 12 节（P1 自定义） */
+export function normalizeSections(raw) {
+  const list = Array.isArray(raw) ? raw : null
+  const timeRe = /^\d{1,2}:\d{2}$/
+  const valid =
+    list &&
+    list.length >= 1 &&
+    list.every(
+      (s) =>
+        Number.isInteger(s?.index) && timeRe.test(String(s?.start)) && timeRe.test(String(s?.end))
+    )
+  const sections = valid ? list : DEFAULT_SECTIONS
+  return sections.slice().sort((a, b) => a.index - b.index)
+}
+
+/** 课程覆盖的周次集合（1 起）：every=全学期；odd/even=奇偶；custom=自定义列表 */
+export function weeksOf(course, totalWeeks) {
+  const rule = course?.weekRule || { type: 'every', weeks: [] }
+  const n = Math.max(1, Number(totalWeeks) || 20)
+  switch (rule.type) {
+    case 'odd':
+      return Array.from({ length: Math.ceil(n / 2) }, (_, i) => 2 * i + 1)
+    case 'even':
+      return Array.from({ length: Math.floor(n / 2) }, (_, i) => (i + 1) * 2)
+    case 'custom':
+      return (Array.isArray(rule.weeks) ? rule.weeks : []).filter((w) => w >= 1 && w <= n)
+    default:
+      return Array.from({ length: n }, (_, i) => i + 1)
+  }
+}
+
+/** 查重：newCourse 与 courses（排除自身）的冲突——同日 + 节次重叠 + 周次集合相交 */
+export function findConflicts(newCourse, courses, totalWeeks) {
+  const newWeeks = weeksOf(newCourse, totalWeeks)
+  const newSet = new Set(newWeeks)
+  const newStart = Number(newCourse.startSection) || 1
+  const newEnd = Number(newCourse.endSection) || newStart
+  const result = []
+  for (const c of courses || []) {
+    if (c.id && newCourse.id && c.id === newCourse.id) continue
+    if (Number(c.dayOfWeek) !== Number(newCourse.dayOfWeek)) continue
+    const cStart = Number(c.startSection) || 1
+    const cEnd = Number(c.endSection) || cStart
+    if (cStart > newEnd || cEnd < newStart) continue // 节次不重叠
+    const overlap = weeksOf(c, totalWeeks).filter((w) => newSet.has(w))
+    if (overlap.length) result.push({ course: c, overlapWeeks: overlap })
+  }
+  return result
 }
 
 /** 周区间文案：'第 12 周 (09.14-09.20)' */

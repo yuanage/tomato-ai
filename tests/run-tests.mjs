@@ -24,6 +24,9 @@ import {
   weekRangeLabel,
   fmtDate,
   defaultMeta,
+  normalizeSections,
+  weeksOf,
+  findConflicts,
   COURSE_COLORS
 } from '../src/utils/schedule'
 
@@ -624,8 +627,51 @@ test('defaultMeta 与色盘：结构完整', () => {
   const m = defaultMeta()
   assert.equal(typeof m.semesterStart, 'string')
   assert.equal(m.totalWeeks, 20)
+  assert.equal(m.showWeekend, true)
   assert.equal(fmtDate(mondayOf(new Date())), m.semesterStart) // 起始日 = 本周一
   assert.equal(COURSE_COLORS.length, 8)
+})
+
+test('normalizeSections：非法/缺失回退内置表，合法排序', () => {
+  assert.equal(normalizeSections(null).length, 12)
+  assert.equal(normalizeSections([{ index: 1, start: 'x', end: 'y' }]).length, 12) // 字段非法
+  const custom = normalizeSections([
+    { index: 2, start: '09:00', end: '09:45' },
+    { index: 1, start: '08:00', end: '08:45' }
+  ])
+  assert.equal(custom.length, 2)
+  assert.equal(custom[0].index, 1) // 按 index 排序
+})
+
+test('weeksOf：每周/单周/双周/自定义周次集合', () => {
+  assert.deepEqual(weeksOf({ weekRule: { type: 'every' } }, 5), [1, 2, 3, 4, 5])
+  assert.deepEqual(weeksOf({ weekRule: { type: 'odd' } }, 5), [1, 3, 5])
+  assert.deepEqual(weeksOf({ weekRule: { type: 'even' } }, 5), [2, 4])
+  assert.deepEqual(weeksOf({ weekRule: { type: 'custom', weeks: [3, 99, -1] } }, 5), [3]) // 越界过滤
+  assert.deepEqual(weeksOf({}, 3), [1, 2, 3]) // 缺省规则
+})
+
+test('findConflicts：同日 + 节次重叠 + 周次相交才冲突', () => {
+  const list = [
+    { id: 'a', name: '高数', dayOfWeek: 1, startSection: 1, endSection: 2, weekRule: { type: 'every' } },
+    { id: 'b', name: '英语', dayOfWeek: 1, startSection: 3, endSection: 4, weekRule: { type: 'every' } },
+    { id: 'c', name: '体育', dayOfWeek: 1, startSection: 1, endSection: 2, weekRule: { type: 'odd' } }
+  ]
+  const base = { id: 'x', name: '新课程', dayOfWeek: 1, startSection: 2, endSection: 3, weekRule: { type: 'every' } }
+  const r1 = findConflicts(base, list, 20) // 2-3 节与高数(1-2)/英语(3-4) 边界重叠
+  assert.deepEqual(r1.map((x) => x.course.name), ['高数', '英语', '体育'])
+  // 与单周课(体育)同节次：每周课任何周都冲突
+  const r2 = findConflicts({ ...base, startSection: 1, endSection: 2 }, list, 20)
+  assert.deepEqual(r2.map((x) => x.course.name).sort(), ['体育', '高数'])
+  // 双周课 vs 单周课：同节次但不冲突（周次不相交）
+  const r3 = findConflicts({ ...base, weekRule: { type: 'even' }, startSection: 1, endSection: 2 }, list, 20)
+  assert.deepEqual(r3.map((x) => x.course.name), ['高数'])
+  // 编辑自身不与自己冲突（英语 3-4 节与自身外课程无重叠）
+  const r4 = findConflicts({ ...list[1], id: 'b' }, list, 20)
+  assert.deepEqual(r4, [])
+  // 不同天不冲突
+  const r5 = findConflicts({ ...base, dayOfWeek: 2 }, list, 20)
+  assert.deepEqual(r5, [])
 })
 
 // ==================== 汇总 ====================

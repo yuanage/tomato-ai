@@ -9,21 +9,21 @@
       </div>
       <button class="week-btn" type="button" :disabled="viewWeek >= meta.totalWeeks" @click="shiftWeek(1)">›</button>
       <button class="today-btn" type="button" @click="gotoCurrentWeek">今天</button>
-      <button class="gear-btn" type="button" title="学期设置" @click="metaModalShow = true">⚙</button>
+      <button class="gear-btn" type="button" title="学期设置" @click="openMeta">⚙</button>
     </div>
 
     <!-- 课表：表头 + 主体（全天节次常显，对标 WakeUp：左侧节次时间、实色课程块白字） -->
     <div class="sched-wrap">
       <div class="sched-header">
         <div class="grid-corner"></div>
-        <div v-for="day in weekDays" :key="'h' + day.dow" class="day-head" :class="{ today: day.isToday }">
+        <div v-for="day in gridDays" :key="'h' + day.dow" class="day-head" :class="{ today: day.isToday }">
           <div>{{ day.label }}</div>
           <div class="day-date">{{ dayDate(day.date) }}</div>
         </div>
       </div>
 
       <div class="sched-body">
-        <!-- 节次时间列：全天 12 节常显（含真实时间） -->
+        <!-- 节次时间列：全天节次常显（含真实时间） -->
         <div class="time-col">
           <div v-for="sec in fullSections" :key="'t' + sec.index" class="time-cell">
             <span class="t-start">{{ sec.start }}</span>
@@ -32,7 +32,7 @@
         </div>
         <!-- 星期列：背景节次线 + 课程块 -->
         <div
-          v-for="day in weekDays"
+          v-for="day in gridDays"
           :key="'d' + day.dow"
           class="day-col"
           :class="{ 'col-today': day.isToday }"
@@ -130,6 +130,9 @@
             ></button>
           </div>
         </div>
+        <n-alert v-if="formConflicts.length" type="warning" :bordered="false">
+          ⚠ 与「{{ conflictNames }}」时间冲突（同一天同一节次且周次重叠），保存时将再次确认
+        </n-alert>
       </div>
       <template #footer>
         <div class="modal-actions">
@@ -177,6 +180,25 @@
           <span class="f-label">总周数</span>
           <n-input-number v-model:value="metaForm.totalWeeks" :min="4" :max="30" style="width: 100px" />
         </div>
+        <div class="field-row">
+          <span class="f-label">周末</span>
+          <n-switch v-model:value="metaForm.showWeekend" />
+          <span class="meta-hint">关闭后仅显示周一至周五</span>
+        </div>
+
+        <!-- 节次时间表（P1 自定义） -->
+        <div class="sections-head">
+          <span class="f-label">节次时间</span>
+          <n-button size="tiny" quaternary @click="resetSectionTimes">恢复默认</n-button>
+        </div>
+        <div class="sections-editor">
+          <div v-for="sec in metaForm.sections" :key="sec.index" class="sec-edit-row">
+            <span class="sec-idx">{{ sec.index }}</span>
+            <n-time-picker v-model:value="sec.start" format="HH:mm" size="small" style="width: 88px" />
+            <span class="f-sep">至</span>
+            <n-time-picker v-model:value="sec.end" format="HH:mm" size="small" style="width: 88px" />
+          </div>
+        </div>
       </div>
       <template #footer>
         <div class="modal-actions">
@@ -190,18 +212,21 @@
 
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
-import { useMessage } from 'naive-ui'
+import { useMessage, useDialog } from 'naive-ui'
 import {
   DEFAULT_SECTIONS,
   COURSE_COLORS,
   courseInWeek,
   buildWeekDays,
   weekRangeLabel,
-  fmtDate
+  fmtDate,
+  normalizeSections,
+  findConflicts
 } from '../utils/schedule'
 import { useSchedule } from '../composables/useSchedule'
 
 const message = useMessage()
+const dialog = useDialog()
 const {
   courses,
   meta,
@@ -214,8 +239,8 @@ const {
 } = useSchedule()
 
 const ROW_H = 48 // 每节行高（px），课程块定位依据
-/** 全天节次常显（对标 WakeUp：表始终为完整一天，不随课程收缩） */
-const fullSections = DEFAULT_SECTIONS
+/** 生效节次表（P1 自定义：meta.sections 优先，回退内置 12 节） */
+const fullSections = computed(() => normalizeSections(meta.value.sections))
 
 // ---------- 周次导航 ----------
 const viewWeek = ref(1)
@@ -231,6 +256,10 @@ function shiftWeek(delta) {
 }
 
 const weekDays = computed(() => buildWeekDays(viewWeek.value, meta.value.semesterStart))
+/** 网格列：可按设置隐藏周末（P1） */
+const gridDays = computed(() =>
+  meta.value.showWeekend === false ? weekDays.value.filter((d) => d.dow <= 5) : weekDays.value
+)
 const visibleCourses = computed(() =>
   courses.value.filter((c) => courseInWeek(c, viewWeek.value))
 )
@@ -256,13 +285,27 @@ function blockStyle(course) {
 // ---------- 课程表单 ----------
 const editShow = ref(false)
 const editing = ref(null) // null=新建
-const sectionOptions = DEFAULT_SECTIONS.map((s) => ({
-  label: `${s.index} 节 ${s.start}-${s.end}`,
-  value: s.index
-}))
+/** 节次选项随自定义时间表联动 */
+const sectionOptions = computed(() =>
+  fullSections.value.map((s) => ({
+    label: `${s.index} 节 ${s.start}-${s.end}`,
+    value: s.index
+  }))
+)
 const weekOptions = computed(() =>
   Array.from({ length: meta.value.totalWeeks }, (_, i) => ({ label: `第 ${i + 1} 周`, value: i + 1 }))
 )
+
+/** 表单实时冲突检测（保存时二次确认） */
+const formConflicts = computed(() => {
+  if (!form.value.name.trim()) return []
+  return findConflicts(
+    { ...form.value, id: editing.value?.id ?? undefined },
+    courses.value,
+    meta.value.totalWeeks
+  )
+})
+const conflictNames = computed(() => formConflicts.value.map((c) => c.course.name).join('、'))
 
 const emptyForm = () => ({
   name: '',
@@ -298,12 +341,26 @@ function openEdit(course) {
 }
 
 async function handleSave() {
+  if (formConflicts.value.length) {
+    dialog.warning({
+      title: '课程时间冲突',
+      content: `与「${conflictNames.value}」在同一天、同一节次且周次重叠，仍要保存吗？`,
+      positiveText: '仍要保存',
+      negativeText: '返回修改',
+      onPositiveClick: () => doSave()
+    })
+    return
+  }
+  await doSave()
+}
+
+async function doSave() {
   try {
     const input = {
       ...form.value,
       dayOfWeek: Number(form.value.dayOfWeek),
-      startSection: Math.min(Number(form.value.startSection) || 1, DEFAULT_SECTIONS.length),
-      endSection: Math.min(Number(form.value.endSection) || 1, DEFAULT_SECTIONS.length)
+      startSection: Math.min(Number(form.value.startSection) || 1, fullSections.value.length),
+      endSection: Math.min(Number(form.value.endSection) || 1, fullSections.value.length)
     }
     if (editing.value) {
       await updateCourse(editing.value.id, input)
@@ -328,22 +385,40 @@ async function handleDelete() {
   }
 }
 
-// ---------- 学期设置 ----------
+// ---------- 学期设置（P1：起始日/总周数/隐藏周末/节次时间自定义） ----------
 const metaModalShow = ref(false)
-const metaForm = ref({ startTs: Date.now(), totalWeeks: 20 })
+const metaForm = ref({ startTs: Date.now(), totalWeeks: 20, showWeekend: true, sections: [] })
 
 function openMeta() {
   const [y, m, d] = meta.value.semesterStart.split('-').map(Number)
   metaForm.value = {
     startTs: new Date(y, m - 1, d).getTime(),
-    totalWeeks: meta.value.totalWeeks
+    totalWeeks: meta.value.totalWeeks,
+    showWeekend: meta.value.showWeekend !== false,
+    sections: normalizeSections(meta.value.sections).map((s) => ({ ...s }))
   }
   metaModalShow.value = true
 }
 
+function resetSectionTimes() {
+  metaForm.value.sections = DEFAULT_SECTIONS.map((s) => ({ ...s }))
+}
+
 async function handleSaveMeta() {
+  const sections = metaForm.value.sections
+    .filter((s) => /^\d{2}:\d{2}$/.test(s.start) && /^\d{2}:\d{2}$/.test(s.end))
+    .map((s) => ({ index: Number(s.index), start: s.start, end: s.end }))
+  if (!sections.length) {
+    message.error('节次时间格式不正确')
+    return
+  }
   try {
-    await updateMeta({ semesterStart: fmtDate(metaForm.value.startTs), totalWeeks: metaForm.value.totalWeeks })
+    await updateMeta({
+      semesterStart: fmtDate(metaForm.value.startTs),
+      totalWeeks: metaForm.value.totalWeeks,
+      showWeekend: metaForm.value.showWeekend,
+      sections
+    })
     message.success('学期设置已保存')
     metaModalShow.value = false
   } catch {
@@ -664,5 +739,49 @@ watch(meta, () => {
   color: var(--text-tertiary);
   margin: 0;
   line-height: 1.6;
+}
+
+/* P1：节次时间自定义编辑区 */
+.sections-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sections-editor {
+  max-height: 240px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-s);
+  background: var(--surface);
+}
+
+.sec-edit-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sec-idx {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--surface-variant);
+  color: var(--text-secondary);
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+/* 冲突提示间距 */
+.sections-editor + .field-row,
+.conflict-alert {
+  margin-top: 2px;
 }
 </style>
