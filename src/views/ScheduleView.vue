@@ -12,7 +12,7 @@
       <button class="gear-btn" type="button" title="学期设置" @click="metaModalShow = true">⚙</button>
     </div>
 
-    <!-- 课表：表头 + 主体（每列独立容器，课程块列内绝对定位） -->
+    <!-- 课表：表头 + 主体（全天节次常显，对标 WakeUp：左侧节次时间、实色课程块白字） -->
     <div class="sched-wrap">
       <div class="sched-header">
         <div class="grid-corner"></div>
@@ -23,9 +23,12 @@
       </div>
 
       <div class="sched-body">
-        <!-- 节次时间列 -->
+        <!-- 节次时间列：全天 12 节常显（含真实时间） -->
         <div class="time-col">
-          <div v-for="s in maxSection" :key="'t' + s" class="time-cell">{{ s }}</div>
+          <div v-for="sec in fullSections" :key="'t' + sec.index" class="time-cell">
+            <span class="t-start">{{ sec.start }}</span>
+            <span class="t-end">{{ sec.end }}</span>
+          </div>
         </div>
         <!-- 星期列：背景节次线 + 课程块 -->
         <div
@@ -34,7 +37,7 @@
           class="day-col"
           :class="{ 'col-today': day.isToday }"
         >
-          <div v-for="s in maxSection" :key="'l' + s" class="cell-line"></div>
+          <div v-for="sec in fullSections" :key="'l' + sec.index" class="cell-line"></div>
           <div
             v-for="c in coursesOf(day.dow)"
             :key="c.id"
@@ -210,7 +213,9 @@ const {
   updateMeta
 } = useSchedule()
 
-const ROW_H = 46 // 每节行高（px），课程块定位依据
+const ROW_H = 48 // 每节行高（px），课程块定位依据
+/** 全天节次常显（对标 WakeUp：表始终为完整一天，不随课程收缩） */
+const fullSections = DEFAULT_SECTIONS
 
 // ---------- 周次导航 ----------
 const viewWeek = ref(1)
@@ -229,11 +234,6 @@ const weekDays = computed(() => buildWeekDays(viewWeek.value, meta.value.semeste
 const visibleCourses = computed(() =>
   courses.value.filter((c) => courseInWeek(c, viewWeek.value))
 )
-/** 当前周内最大节次（没课也至少显示 4 节，避免空表太矮） */
-const maxSection = computed(() => {
-  const top = visibleCourses.value.reduce((m, c) => Math.max(m, c.endSection || 0), 0)
-  return Math.max(4, Math.min(top, DEFAULT_SECTIONS.length))
-})
 
 function dayDate(ts) {
   return String(new Date(ts).getDate()).padStart(2, '0')
@@ -249,8 +249,7 @@ function blockStyle(course) {
   return {
     top: `${top}px`,
     height: `${height}px`,
-    background: `${course.color}1f`,
-    borderLeft: `3px solid ${course.color}`
+    background: course.color
   }
 }
 
@@ -435,11 +434,14 @@ watch(meta, () => {
 
 .sched-header {
   display: flex;
-  min-width: 420px;
+  min-width: 460px;
+  position: sticky;
+  top: 0;
+  z-index: 5;
 }
 
 .grid-corner {
-  width: 30px;
+  width: 48px;
   flex-shrink: 0;
   background: var(--surface-variant);
   border-bottom: 1px solid var(--outline);
@@ -476,23 +478,35 @@ watch(meta, () => {
 
 .sched-body {
   display: flex;
-  min-width: 420px;
+  min-width: 460px;
 }
 
 .time-col {
-  width: 30px;
+  width: 48px;
   flex-shrink: 0;
   background: var(--surface-variant);
 }
 
 .time-cell {
-  height: 46px;
+  height: 48px;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  font-size: 10px;
-  color: var(--text-tertiary);
+  gap: 1px;
   border-bottom: 1px solid var(--outline);
+}
+
+.t-start {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.t-end {
+  font-size: 9px;
+  color: var(--text-tertiary);
   font-variant-numeric: tabular-nums;
 }
 
@@ -508,48 +522,51 @@ watch(meta, () => {
 }
 
 .cell-line {
-  height: 46px;
+  height: 48px;
   border-bottom: 1px solid var(--outline);
 }
 
-/* 课程块：在所属星期列内绝对定位（top/height 由节次换算） */
+/* 课程块：WakeUp 风格——实色圆角色块 + 白字 */
 .course-block {
   position: absolute;
   z-index: 2;
   left: 3px;
   width: calc(100% - 6px);
   border-radius: 8px;
-  padding: 4px 6px;
+  padding: 5px 6px;
   overflow: hidden;
   cursor: pointer;
   display: flex;
   flex-direction: column;
-  gap: 1px;
-}
-
-.course-today {
-  outline: 1px solid var(--primary);
-  outline-offset: -1px;
+  gap: 2px;
+  box-shadow: 0 1px 3px rgba(31, 31, 31, 0.18);
 }
 
 .course-name {
-  font-size: 12px;
-  font-weight: 600;
-  line-height: 1.25;
+  font-size: 12.5px;
+  font-weight: 700;
+  line-height: 1.3;
+  color: #ffffff;
   word-break: break-all;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
 }
 
 .course-loc,
 .course-teacher {
   font-size: 10px;
-  color: var(--text-tertiary);
+  color: rgba(255, 255, 255, 0.92);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.course-today {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
 }
 
 .empty-hint {
