@@ -59,6 +59,8 @@ import navAiFilled from './assets/icons/nav-ai-filled.png'
 import navAiOutline from './assets/icons/nav-ai-outline.png'
 import navSettingsFilled from './assets/icons/nav-settings-filled.png'
 import navSettingsOutline from './assets/icons/nav-settings-outline.png'
+import navScheduleFilled from './assets/icons/nav-schedule-filled.png'
+import navScheduleOutline from './assets/icons/nav-schedule-outline.png'
 
 const route = useRoute()
 
@@ -134,6 +136,7 @@ const themeOverrides = computed(() => ({
 const navGlyphs = {
   focus: { filled: navFocusFilled, outline: navFocusOutline },
   task: { filled: navTaskFilled, outline: navTaskOutline },
+  schedule: { filled: navScheduleFilled, outline: navScheduleOutline },
   stats: { filled: navStatsFilled, outline: navStatsOutline },
   ai: { filled: navAiFilled, outline: navAiOutline },
   settings: { filled: navSettingsFilled, outline: navSettingsOutline }
@@ -142,6 +145,7 @@ const navGlyphs = {
 const navItems = [
   { path: '/', label: '专注', key: 'focus' },
   { path: '/tasks', label: '任务', key: 'task' },
+  { path: '/schedule', label: '课表', key: 'schedule' },
   { path: '/stats', label: '统计', key: 'stats' },
   { path: '/ai', label: 'AI助手', key: 'ai' },
   { path: '/settings', label: '设置', key: 'settings' }

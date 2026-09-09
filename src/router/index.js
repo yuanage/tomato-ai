@@ -6,6 +6,7 @@ import HomeView from '../views/HomeView.vue'
 const routes = [
   { path: '/', name: 'home', component: HomeView, meta: { title: '专注' } },
   { path: '/tasks', name: 'tasks', component: () => import('../views/TasksView.vue'), meta: { title: '任务' } },
+  { path: '/schedule', name: 'schedule', component: () => import('../views/ScheduleView.vue'), meta: { title: '课表' } },
   { path: '/stats', name: 'stats', component: () => import('../views/StatsView.vue'), meta: { title: '统计' } },
   { path: '/ai', name: 'ai', component: () => import('../views/AiView.vue'), meta: { title: 'AI助手' } },
   { path: '/settings', name: 'settings', component: () => import('../views/SettingsView.vue'), meta: { title: '设置' } }

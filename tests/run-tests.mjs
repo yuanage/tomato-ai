@@ -16,6 +16,16 @@ import { sanitizeSavedState } from '../src/utils/aiState'
 import { buildInsights, bestFocusWindow, focusStreakDays, overloadTasks } from '../src/api/localInsights'
 import { mockResponse } from '../src/api/mock'
 import { createDualStore, chooseSide, parseSide } from '../src/utils/storage'
+import {
+  weekNumberFor,
+  courseInWeek,
+  mondayOf,
+  buildWeekDays,
+  weekRangeLabel,
+  fmtDate,
+  defaultMeta,
+  COURSE_COLORS
+} from '../src/utils/schedule'
 
 let passed = 0
 let failed = 0
@@ -557,6 +567,65 @@ test('序列化：中文与 emoji 内容经 JSON 双通道往返无损', async (
   assert.deepEqual(JSON.parse(fs.get('tasks')).data, payload)
   const readBack = await store.read('tasks', null)
   assert.deepEqual(readBack, payload)
+})
+
+// ==================== schedule.js 课程表纯逻辑 ====================
+section('schedule.js 周次/课程规则')
+// 锚点：2026-09-07 周一（第 1 周起点）
+
+test('weekNumberFor：周一为第 1 周起点，周日仍在第 1 周', () => {
+  assert.equal(weekNumberFor('2026-09-07', '2026-09-07'), 1)
+  assert.equal(weekNumberFor('2026-09-13', '2026-09-07'), 1)
+})
+
+test('weekNumberFor：下一周递进，早于学期按第 1 周', () => {
+  assert.equal(weekNumberFor('2026-09-14', '2026-09-07'), 2)
+  assert.equal(weekNumberFor('2026-09-21', '2026-09-07'), 3)
+  assert.equal(weekNumberFor('2026-08-10', '2026-09-07'), 1)
+})
+
+test('mondayOf：周中与周日都归到本周一', () => {
+  assert.equal(fmtDate(mondayOf(new Date(2026, 8, 10))), '2026-09-07') // 周四
+  assert.equal(fmtDate(mondayOf(new Date(2026, 8, 13))), '2026-09-07') // 周日
+})
+
+test('courseInWeek：每周/单周/双周/自定义规则', () => {
+  assert.equal(courseInWeek({ weekRule: { type: 'every' } }, 5), true)
+  assert.equal(courseInWeek({ weekRule: { type: 'odd' } }, 3), true)
+  assert.equal(courseInWeek({ weekRule: { type: 'odd' } }, 4), false)
+  assert.equal(courseInWeek({ weekRule: { type: 'even' } }, 2), true)
+  assert.equal(courseInWeek({ weekRule: { type: 'even' } }, 1), false)
+  assert.equal(courseInWeek({ weekRule: { type: 'custom', weeks: [2, 5] } }, 5), true)
+  assert.equal(courseInWeek({ weekRule: { type: 'custom', weeks: [2, 5] } }, 3), false)
+})
+
+test('courseInWeek：缺省规则按每周上课', () => {
+  assert.equal(courseInWeek({}, 7), true)
+  assert.equal(courseInWeek({ weekRule: null }, 7), true)
+})
+
+test('buildWeekDays：一周 7 天、周一至周日、今日标记存在', () => {
+  const days = buildWeekDays(2, '2026-09-07')
+  assert.equal(days.length, 7)
+  assert.equal(days[0].label, '周一')
+  assert.equal(days[0].dow, 1)
+  assert.equal(days[6].label, '周日')
+  assert.equal(fmtDate(days[0].date), '2026-09-14')
+  assert.equal(fmtDate(days[6].date), '2026-09-20')
+  assert.equal(typeof days[0].isToday, 'boolean')
+})
+
+test('weekRangeLabel：周区间文案正确', () => {
+  assert.equal(weekRangeLabel(1, '2026-09-07', 20), '第 1 周 (09.07-09.13)')
+  assert.equal(weekRangeLabel(2, '2026-09-07', 20), '第 2 周 (09.14-09.20)')
+})
+
+test('defaultMeta 与色盘：结构完整', () => {
+  const m = defaultMeta()
+  assert.equal(typeof m.semesterStart, 'string')
+  assert.equal(m.totalWeeks, 20)
+  assert.equal(fmtDate(mondayOf(new Date())), m.semesterStart) // 起始日 = 本周一
+  assert.equal(COURSE_COLORS.length, 8)
 })
 
 // ==================== 汇总 ====================

@@ -186,7 +186,15 @@ function withTimeout(promise, ms) {
 const IS_TAURI = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
 
 /** 允许镜像到文件的键白名单（与 Rust 侧保持一致，防注入） */
-const FS_KEYS = ['tasks', 'pomodoro_records', 'settings', 'ai_agent_state', 'ai_config']
+const FS_KEYS = [
+  'tasks',
+  'pomodoro_records',
+  'settings',
+  'ai_agent_state',
+  'ai_config',
+  'courses',
+  'schedule_meta'
+]
 
 /** 文件通道调用超时：invoke 永不返回会卡死写队列，必须限时 */
 const FS_TIMEOUT_MS = 5000
@@ -358,6 +366,36 @@ export async function getSettings() {
 export async function saveSettings(patch) {
   const current = await getSettings()
   await dual.write(SETTINGS_KEY, { ...current, ...patch })
+}
+
+// ==================== 课程表 ====================
+// 课程结构：{ id, name, location, teacher, dayOfWeek, startSection, endSection,
+//            weekRule:{type,weeks}, color, createdAt }
+// 学期元数据：{ semesterStart:'YYYY-MM-DD', totalWeeks }
+
+const COURSES_KEY = 'courses'
+const SCHEDULE_META_KEY = 'schedule_meta'
+
+/** 读取全部课程 */
+export async function getCourses() {
+  const list = await dual.read(COURSES_KEY, null)
+  return Array.isArray(list) ? list : []
+}
+
+/** 整体保存课程列表 */
+export async function saveCourses(list) {
+  await dual.write(COURSES_KEY, list)
+}
+
+/** 读取学期元数据；无数据返回 null */
+export async function getScheduleMeta() {
+  const meta = await dual.read(SCHEDULE_META_KEY, null)
+  return meta && typeof meta === 'object' ? meta : null
+}
+
+/** 保存学期元数据 */
+export async function saveScheduleMeta(meta) {
+  await dual.write(SCHEDULE_META_KEY, meta)
 }
 
 // ==================== AI 助手状态 ====================
