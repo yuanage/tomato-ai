@@ -188,6 +188,9 @@ const IS_TAURI = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in windo
 /** 允许镜像到文件的键白名单（与 Rust 侧保持一致，防注入） */
 const FS_KEYS = ['tasks', 'pomodoro_records', 'settings', 'ai_agent_state', 'ai_config']
 
+/** 文件通道调用超时：invoke 永不返回会卡死写队列，必须限时 */
+const FS_TIMEOUT_MS = 5000
+
 function fsFail(op, key, e) {
   pushLog({ at: Date.now(), type: 'storage-fs', msg: `${op}(${key}) 失败: ${e?.message || e}` })
 }
@@ -195,7 +198,7 @@ function fsFail(op, key, e) {
 async function fsSet(key, value) {
   if (!IS_TAURI || !FS_KEYS.includes(key)) return
   try {
-    await invoke('fs_save', { key, value: JSON.stringify(value) })
+    await withTimeout(invoke('fs_save', { key, value: JSON.stringify(value) }), FS_TIMEOUT_MS)
   } catch (e) {
     fsFail('save', key, e)
     throw e
@@ -205,7 +208,7 @@ async function fsSet(key, value) {
 async function fsGet(key) {
   if (!IS_TAURI || !FS_KEYS.includes(key)) return null
   try {
-    const s = await invoke('fs_load', { key })
+    const s = await withTimeout(invoke('fs_load', { key }), FS_TIMEOUT_MS)
     return s ? JSON.parse(s) : null
   } catch (e) {
     fsFail('load', key, e)
@@ -216,7 +219,7 @@ async function fsGet(key) {
 async function fsRemove(key) {
   if (!IS_TAURI || !FS_KEYS.includes(key)) return
   try {
-    await invoke('fs_remove', { key })
+    await withTimeout(invoke('fs_remove', { key }), FS_TIMEOUT_MS)
   } catch (e) {
     fsFail('remove', key, e)
     throw e
@@ -384,17 +387,20 @@ export async function readPersistedAIConfig() {
   return dual.read(AI_CONFIG_KEY, null)
 }
 
-// ==================== 存储自检（设置页诊断用） ====================
+// ==================== 通道探测 / 启动预热（自动激活存储通道） ====================
+
+/** 探针键：独立于业务键，写完即删（Rust 白名单已放行） */
+const PROBE_KEY = '__selfcheck__'
 
 /**
- * 存储自检：向双通道写探针并直接读回比对，验证两端读写链路。
- * 探针用独立键 __selfcheck__（Rust 白名单已放行），写完即删，不触碰业务数据。
+ * 探测双通道读写链路（原始通道直连，不经写队列）。
  * 返回 { idbOk, fsOk, fsEnvelopeOk, errors }；非 Tauri 环境 fsOk 为 'skip'。
+ * 该探测本身会完成一次 IndexedDB 打开与文件读写——即"激活"通道，
+ * 这正是手动自检后功能恢复的原因，现改为启动时自动执行。
  */
-export async function runStorageSelfCheck() {
-  const PROBE_KEY = '__selfcheck__'
-  const probe = { t: Date.now(), tag: genId() }
+async function probeChannels() {
   const result = { idbOk: false, fsOk: false, fsEnvelopeOk: false, errors: [] }
+  const probe = { t: Date.now(), tag: genId() }
 
   try {
     await localforage.setItem(PROBE_KEY, probe)
@@ -411,15 +417,61 @@ export async function runStorageSelfCheck() {
   } else {
     try {
       const envelope = JSON.stringify({ v: 1, savedAt: Date.now(), data: probe })
-      await invoke('fs_save', { key: PROBE_KEY, value: envelope })
-      const raw = await invoke('fs_load', { key: PROBE_KEY })
+      await withTimeout(invoke('fs_save', { key: PROBE_KEY, value: envelope }), FS_TIMEOUT_MS)
+      const raw = await withTimeout(invoke('fs_load', { key: PROBE_KEY }), FS_TIMEOUT_MS)
       const parsed = raw ? JSON.parse(raw) : null
       result.fsOk = !!(parsed && parsed.data && parsed.data.tag === probe.tag)
       result.fsEnvelopeOk = !!(parsed && parsed.v === 1 && typeof parsed.savedAt === 'number')
-      await invoke('fs_remove', { key: PROBE_KEY })
+      await withTimeout(invoke('fs_remove', { key: PROBE_KEY }), FS_TIMEOUT_MS)
     } catch (e) {
       result.errors.push(`文件镜像: ${e?.message || e}`)
     }
   }
   return result
+}
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+
+/** 通道健康判定：IndexedDB 正常 且（文件通道正常或非 Tauri 环境） */
+function isHealthy(r) {
+  return r.idbOk === true && (r.fsOk === true || r.fsOk === 'skip')
+}
+
+/**
+ * 启动预热：自动探测双通道，失败按 600ms/1.5s/3s 退避重试，
+ * 确保用户开始操作前通道已激活——应用一打开即可正常保存任务，无需手动检测。
+ * 幂等：多次调用共享同一 Promise；重试仍失败则记日志并弹告警（节流）。
+ */
+let warmupPromise = null
+export function warmUpStorage() {
+  if (!warmupPromise) {
+    warmupPromise = (async () => {
+      const backoffs = [600, 1500, 3000]
+      let result = null
+      for (let i = 0; i <= backoffs.length; i++) {
+        if (i > 0) await sleep(backoffs[i - 1])
+        result = await probeChannels()
+        if (isHealthy(result)) return result
+      }
+      pushLog({
+        at: Date.now(),
+        type: 'storage-warmup',
+        msg: `启动自检未通过: ${(result?.errors || []).join('; ')}`
+      })
+      notifyIssue('本地存储通道启动自检未通过，请到 设置→数据管理→检测本地数据通道 复核')
+      return result
+    })()
+    warmupPromise.catch(() => {}) // 永不向外抛错
+  }
+  return warmupPromise
+}
+
+// 应用启动自动预热（延迟 400ms，待页面与 Tauri IPC 就绪）；SSR/测试环境跳过
+if (typeof window !== 'undefined') {
+  setTimeout(warmUpStorage, 400)
+}
+
+/** 手动自检（设置页按钮）：与启动预热共用同一探测逻辑 */
+export async function runStorageSelfCheck() {
+  return probeChannels()
 }
