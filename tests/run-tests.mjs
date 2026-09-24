@@ -38,6 +38,8 @@ import {
   parseTableGrid,
   parseMatrixCell,
   parseHtmlCourseTable,
+  parseEamsScript,
+  weeksToRule,
   courseKey,
   dedupeAgainst,
   encodeShare,
@@ -868,6 +870,130 @@ test('防回归：useTasks() 暴露 incrementTaskPomodoros（绑定任务计数�
   assert.equal(typeof api.incrementTaskPomodoros, 'function')
   assert.equal(typeof api.addTask, 'function')
   assert.equal(typeof api.ensureLoaded, 'function')
+})
+
+// ==================== EAMS 教务（湖南一师真实格式） ====================
+section('importSchedule.js beangle EAMS 专属解析')
+
+// 按真实页面结构精简：14 行节次（含中午两行）+ 内嵌 TaskActivity 结构化数据
+const EAMS_FIXTURE = `
+<table id="manualArrangeCourseTable">
+<tr><td> 第一节</td><td id="TD0_0" rowspan="2">大学高阶英语 (吴丽萍)</td><td id="TD14_0"></td></tr>
+<tr><td> 第二节</td><td id="TD29_0"></td></tr>
+<tr><td> 第三节</td><td id="TD2_0"></td></tr>
+<tr><td> 第四节</td><td id="TD3_0"></td></tr>
+<tr><td> 中午一节</td><td id="TD4_0"></td></tr>
+<tr><td> 中午二节</td><td id="TD5_0"></td></tr>
+<tr><td> 第五节</td><td id="TD6_0" rowspan="2">大学体育3 (刘娟)</td></tr>
+<tr><td> 第六节</td></tr>
+<tr><td> 第七节</td><td id="TD8_0"></td></tr>
+<tr><td> 第八节</td><td id="TD9_0"></td></tr>
+<tr><td> 第九节</td><td id="TD10_0"></td></tr>
+<tr><td> 第十节</td><td id="TD11_0"></td></tr>
+<tr><td> 第十一节</td><td id="TD12_0"></td></tr>
+<tr><td> 第十二节</td><td id="TD13_0"></td></tr>
+</table>
+<script>
+var unitCount = 14;
+var table0 = new CourseTable(2026,98);
+var teachers = [{id:775,name:"吴丽萍",lab:false}];
+activity = new TaskActivity(actTeacherId.join(','),actTeacherName.join(','),"18770(TSGW1030.01)","大学高阶英语","303","润寰南104","01111111111111111000000000000000000000000000000000000",null,"",assistantName,"","", "班级:25计科润之卓越班","","");
+index =0*unitCount+0;
+table0.activities[index][table0.activities[index].length]=activity;
+index =0*unitCount+1;
+table0.activities[index][table0.activities[index].length]=activity;
+var teachers = [{id:7053193,name:"刘娟",lab:false}];
+activity = new TaskActivity(actTeacherId.join(','),actTeacherName.join(','),"6284(TSTY1011.F8)","大学体育3","577","田径场","01111111111110000000000000000000000000000000000000000",null,"",assistantName,"","", "定向越野与野外生存:25学前国际1班","","");
+index =0*unitCount+6;
+table0.activities[index][table0.activities[index].length]=activity;
+index =0*unitCount+7;
+table0.activities[index][table0.activities[index].length]=activity;
+var teachers = [{id:661,name:"代正利",lab:false}];
+activity = new TaskActivity(actTeacherId.join(','),actTeacherName.join(','),"17754(TSWY2121.01)","毛泽东诗词英译赏析","378","怀中南206","00111111111100100000000000000000000000000000000000000",null,"",assistantName,"","", "全校","","");
+index =1*unitCount+10;
+table0.activities[index][table0.activities[index].length]=activity;
+var teachers = [{id:155,name:"杨恒伏",lab:false}];
+activity = new TaskActivity(actTeacherId.join(','),actTeacherName.join(','),"20561(JS021031.01)","离散数学","-1","停课","00100000000000000000000000000000000000000000000000000",null,"",assistantName,"","", "班级:25计科润之卓越班","","");
+index =3*unitCount+2;
+table0.activities[index][table0.activities[index].length]=activity;
+var teachers = [{id:772,name:"宋徽瑾",lab:false}];
+activity = new TaskActivity(actTeacherId.join(','),actTeacherName.join(','),"18867(TSMY1124.37)","毛泽东思想和中国特色社会主义理论体系概论","1869","探究式学习实践","00100000000000000000000000000000000000000000000000000",null,"",assistantName,"","", "班级:25大数据3班","","");
+index =4*unitCount+8;
+table0.activities[index][table0.activities[index].length]=activity;
+index =4*unitCount+9;
+table0.activities[index][table0.activities[index].length]=activity;
+var teachers = [{id:772,name:"宋徽瑾",lab:false}];
+activity = new TaskActivity(actTeacherId.join(','),actTeacherName.join(','),"18867(TSMY1124.37)","毛泽东思想和中国特色社会主义理论体系概论","492","玉衡楼106","00001000000000001000000000000000000000000000000000000",null,"",assistantName,"","", "班级:25计科润之卓越班","","");
+index =4*unitCount+8;
+table0.activities[index][table0.activities[index].length]=activity;
+index =4*unitCount+9;
+table0.activities[index][table0.activities[index].length]=activity;
+</script>`
+
+test('parseEamsScript：字段映射（名称/教师/地点/星期/节次/连堂）', () => {
+  const list = parseEamsScript(EAMS_FIXTURE)
+  const eng = list.find((c) => c.name === '大学高阶英语')
+  assert.ok(eng, '应解析出大学高阶英语')
+  assert.equal(eng.teacher, '吴丽萍')
+  assert.equal(eng.location, '润寰南104')
+  assert.equal(eng.dayOfWeek, 1) // day 0 → 周一
+  assert.equal(eng.startSection, 1) // 连堂两条 index 合并 1-2 节
+  assert.equal(eng.endSection, 2)
+  assert.deepEqual(eng.weekRule, { type: 'every', weeks: [] }) // 位图 1-16 连续
+})
+
+test('parseEamsScript：中午行跳过后节次对齐（第五节→第 5 节）', () => {
+  const list = parseEamsScript(EAMS_FIXTURE)
+  const pe = list.find((c) => c.name === '大学体育3')
+  assert.ok(pe)
+  assert.equal(pe.dayOfWeek, 1)
+  assert.equal(pe.startSection, 5) // 0 基 6，跳过中午两行
+  assert.equal(pe.endSection, 6)
+  assert.equal(pe.location, '田径场')
+  assert.deepEqual(pe.weekRule, { type: 'every', weeks: [] }) // 1-12 周
+})
+
+test('parseEamsScript：位图→周次（多区间/跨周）', () => {
+  const list = parseEamsScript(EAMS_FIXTURE)
+  const poem = list.find((c) => c.name === '毛泽东诗词英译赏析')
+  assert.ok(poem)
+  assert.equal(poem.dayOfWeek, 2) // day 1 → 周二
+  assert.equal(poem.startSection, 9) // 0 基 10，跳过中午两行
+  assert.deepEqual(poem.weekRule, { type: 'custom', weeks: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 14] })
+})
+
+test('parseEamsScript：停课活动被跳过', () => {
+  const list = parseEamsScript(EAMS_FIXTURE)
+  // 离散数学只有停课活动（地点=停课），不应出现
+  assert.equal(list.find((c) => c.name === '离散数学'), undefined)
+})
+
+test('parseEamsScript：同槽不同周次合并为一条（周次并集）', () => {
+  const list = parseEamsScript(EAMS_FIXTURE)
+  const maogai = list.filter((c) => c.name === '毛泽东思想和中国特色社会主义理论体系概论')
+  assert.equal(maogai.length, 1) // 探究式(第2周) + 玉衡楼(第4,16周) 合并
+  assert.equal(maogai[0].dayOfWeek, 5) // day 4 → 周五
+  assert.equal(maogai[0].startSection, 7) // 0 基 8，跳过中午两行
+  assert.equal(maogai[0].endSection, 8)
+  assert.deepEqual(maogai[0].weekRule, { type: 'custom', weeks: [2, 4, 16] }) // 周次并集
+  assert.equal(maogai[0].location, '玉衡楼106') // 覆盖周最多者
+})
+
+test('weeksToRule：连续/奇偶/自定义归类', () => {
+  assert.deepEqual(weeksToRule([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]), { type: 'every', weeks: [] })
+  assert.deepEqual(weeksToRule([1, 3, 5, 7]), { type: 'odd', weeks: [] })
+  assert.deepEqual(weeksToRule([2, 4, 6, 8]), { type: 'even', weeks: [] })
+  assert.deepEqual(weeksToRule([2, 3, 4]), { type: 'custom', weeks: [2, 3, 4] }) // 非 1 起连续
+  assert.deepEqual(weeksToRule([1, 2, 3, 9, 10]), { type: 'custom', weeks: [1, 2, 3, 9, 10] })
+})
+
+test('parseHtmlCourseTable：EAMS 页面走专属解析器', () => {
+  const list = parseHtmlCourseTable(EAMS_FIXTURE)
+  assert.ok(list.length >= 4)
+  assert.ok(list.find((c) => c.name === '大学高阶英语'))
+  // 无 EAMS 特征的普通矩阵表不受影响
+  const matrix = `<table><tr><th>节次</th><th>周一</th><th>周二</th><th>周三</th></tr><tr><td>1</td><td>英语@外语楼</td><td></td><td></td></tr></table>`
+  assert.equal(parseHtmlCourseTable(matrix).length, 1)
 })
 
 // ==================== 汇总 ====================

@@ -312,6 +312,171 @@ export function parseHtmlMatrix(html) {
   return courses.length ? courses : null
 }
 
+// ==================== beangle EAMS 教务（页面内嵌结构化数据，最优先） ====================
+
+/** 周次集合 → 规则：1 起连续(≥6周)→every；全奇→odd；全偶→even；其余 custom */
+export function weeksToRule(weeks) {
+  const list = [...new Set((weeks || []).filter((w) => w >= 1))].sort((a, b) => a - b)
+  if (!list.length) return { type: 'every', weeks: [] }
+  const max = list[list.length - 1]
+  if (list.every((w, i) => w === i + 1) && max >= 6) return { type: 'every', weeks: [] }
+  if (list.every((w) => w % 2 === 1) && list.length === Math.ceil(max / 2)) return { type: 'odd', weeks: [] }
+  if (list.every((w) => w % 2 === 0) && list.length === Math.floor(max / 2)) return { type: 'even', weeks: [] }
+  return { type: 'custom', weeks: list }
+}
+
+/** 周次位图 → 周次集合（bitmap[i]='1' 表示第 i 周上课；下标 0 为占位） */
+function bitmapToWeeks(bitmap) {
+  const weeks = []
+  const s = String(bitmap ?? '')
+  for (let i = 1; i < s.length; i++) if (s[i] === '1') weeks.push(i)
+  return weeks
+}
+
+/** 提取表格行头标签序列（"第一节"…"中午一节"…），顺序即 0 基节次行序 */
+function extractRowLabels(html) {
+  const re = />\s*(第[一二三四五六七八九十]{1,2}节|中午[一二三四五]节)\s*</g
+  const labels = []
+  for (const m of String(html ?? '').matchAll(re)) labels.push(m[1].trim())
+  return labels
+}
+
+/** EAMS 节次行号（0 基）→ 应用节次号（1 起）；"中午"行不占节次序号 */
+function mapEamsSection(sec0, labels) {
+  if (!labels.length) return sec0 + 1
+  let rank = 0
+  for (let i = 0; i <= sec0 && i < labels.length; i++) {
+    if (!/中午/.test(labels[i])) rank++
+  }
+  return rank || sec0 + 1
+}
+
+/** 按顶层逗号拆分函数参数（尊重引号与括号嵌套） */
+function splitTopArgs(s) {
+  const args = []
+  let depth = 0
+  let cur = ''
+  let inStr = false
+  let q = ''
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i]
+    if (inStr) {
+      cur += ch
+      if (ch === q && s[i - 1] !== '\\') inStr = false
+      continue
+    }
+    if (ch === '"' || ch === "'") {
+      inStr = true
+      q = ch
+      cur += ch
+      continue
+    }
+    if (ch === '(' || ch === '[') depth++
+    if (ch === ')' || ch === ']') depth--
+    if (ch === ',' && depth === 0) {
+      args.push(cur.trim())
+      cur = ''
+      continue
+    }
+    cur += ch
+  }
+  if (cur.trim()) args.push(cur.trim())
+  return args
+}
+
+function unquote(v) {
+  return typeof v === 'string' ? v.replace(/^["']|["']$/g, '').trim() : ''
+}
+
+/**
+ * beangle EAMS 教务课表解析（页面内嵌 JS 结构化数据，精确度最高）：
+ * - 每门课形如 new TaskActivity(教师IDs, 教师名变量, 课号, "课程名", 房间ID, "地点", "周次位图", ...)，
+ *   随后 index = 星期*unitCount + 节次（0 基）出现 1~2 次（连堂）；
+ * - 教师名从前置 var teachers = [{name:".."}] 块解析；
+ * - "停课"活动（地点=停课/房间ID=-1）跳过；
+ * - 同名同天同节次的多个活动（如毛概的实践周）合并为一条，周次取并集、地点取覆盖周最多的。
+ * 仅做字符串/正则解析，不使用 DOMParser（无实体展开风险），纯本地执行。
+ */
+export function parseEamsScript(html) {
+  const text = String(html ?? '')
+  if (!/new\s+TaskActivity\s*\(/.test(text)) return null
+
+  const labels = extractRowLabels(text)
+  const blocks = text.split(/var\s+teachers\s*=\s*\[/).slice(1)
+  if (!blocks.length) return null
+
+  const raw = []
+  for (const block of blocks) {
+    const head = block.match(/^([\s\S]*?)\];/)
+    const names = []
+    if (head) {
+      for (const n of head[1].match(/name\s*:\s*"([^"]+)"/g) || []) {
+        names.push(n.replace(/name\s*:\s*"|"/g, ''))
+      }
+    }
+    const teacher = names.filter(Boolean).join('、')
+
+    const call = block.match(/new\s+TaskActivity\s*\(([\s\S]*?)\)\s*;/)
+    if (!call) continue
+    const args = splitTopArgs(call[1])
+    const name = unquote(args[3])
+    const location = unquote(args[5])
+    const bitmap = unquote(args[6])
+    const roomId = unquote(args[4])
+    if (!name || name.length < 2) continue
+    if (location === '停课' || roomId === '-1') continue // 停课通知，不是真实排课
+
+    const after = block.slice(call.index + call[0].length)
+    const slots = []
+    const idxRe = /index\s*=\s*(\d+)\s*\*\s*unitCount\s*\+\s*(\d+)\s*;/g
+    for (const im of after.matchAll(idxRe)) {
+      slots.push({ day: Number(im[1]), sec: Number(im[2]) })
+    }
+    if (!slots.length) continue
+
+    const days = [...new Set(slots.map((s) => s.day))]
+    const secs = [...new Set(slots.map((s) => s.sec))].sort((a, b) => a - b)
+    const weeks = bitmapToWeeks(bitmap)
+    const coverage = weeks.length
+    for (const day of days) {
+      raw.push({
+        name,
+        location,
+        teacher,
+        dayOfWeek: day + 1,
+        startSection: mapEamsSection(secs[0], labels),
+        endSection: mapEamsSection(secs[secs.length - 1], labels),
+        weeks,
+        coverage
+      })
+    }
+  }
+  if (!raw.length) return null
+
+  // 合并同名同天同节次的多个活动（毛概实践周等）：周次并集，地点取覆盖周最多的
+  const groups = new Map()
+  for (const c of raw) {
+    const key = `${c.name}|${c.dayOfWeek}|${c.startSection}|${c.endSection}`
+    if (!groups.has(key)) groups.set(key, [])
+    groups.get(key).push(c)
+  }
+  const courses = []
+  for (const group of groups.values()) {
+    const base = group.reduce((a, b) => (b.coverage > a.coverage ? b : a))
+    const union = [...new Set(group.flatMap((c) => c.weeks))]
+    courses.push({
+      name: base.name,
+      location: base.location,
+      teacher: base.teacher,
+      dayOfWeek: base.dayOfWeek,
+      startSection: base.startSection,
+      endSection: base.endSection,
+      weekRule: weeksToRule(union)
+    })
+  }
+  return courses
+}
+
 // ==================== 导入去重 ====================
 
 /** 判重键：名称 + 星期 + 起止节次 + 周次规则 */
@@ -387,9 +552,9 @@ export function sniffImport(text) {
   return 'unknown'
 }
 
-/** 解析 HTML 课表（列式优先，失败回退矩阵式）；无法识别返回 null */
+/** 解析 HTML 课表（EAMS 内嵌数据优先 → 列式 → 矩阵式）；无法识别返回 null */
 export function parseHtmlCourseTable(html) {
-  return parseHtmlColumns(html) || parseHtmlMatrix(html)
+  return parseEamsScript(html) || parseHtmlColumns(html) || parseHtmlMatrix(html)
 }
 
 /** 过滤合法导入项（名称/星期/节次有效），并按色盘为缺色项补色 */
