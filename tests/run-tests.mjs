@@ -34,11 +34,18 @@ import {
   parseSectionRange,
   parseDayOfWeek,
   parseHtmlColumns,
+  parseHtmlMatrix,
+  parseTableGrid,
+  parseMatrixCell,
+  parseHtmlCourseTable,
+  courseKey,
+  dedupeAgainst,
   encodeShare,
   decodeShare,
   sniffImport,
   sanitizeImport
 } from '../src/utils/importSchedule'
+import { useTasks } from '../src/composables/useTasks'
 
 let passed = 0
 let failed = 0
@@ -756,6 +763,111 @@ test('sanitizeImport：过滤无效条目', () => {
   const valid = sanitizeImport(list, COURSE_COLORS)
   assert.equal(valid.length, 1)
   assert.equal(valid[0].name, '课程A')
+})
+
+test('sanitizeImport：缺色项按色盘循环补色', () => {
+  const list = [
+    { name: '课程A', dayOfWeek: 1, startSection: 1, endSection: 2 },
+    { name: '课程B', dayOfWeek: 2, startSection: 1, endSection: 2 },
+    { name: '课程C', dayOfWeek: 3, startSection: 1, endSection: 2, color: '#123456' }
+  ]
+  const valid = sanitizeImport(list, COURSE_COLORS, 0)
+  assert.equal(valid[0].color, COURSE_COLORS[0])
+  assert.equal(valid[1].color, COURSE_COLORS[1])
+  assert.equal(valid[2].color, '#123456') // 已带色保留
+})
+
+test('parseTableGrid：rowspan/colspan 还原为等宽网格', () => {
+  const html = `
+  <table>
+    <tr><td rowspan="2">左侧</td><td>a</td><td>b</td></tr>
+    <tr><td colspan="2">宽格</td></tr>
+  </table>`
+  const grid = parseTableGrid(html)
+  assert.equal(grid.length, 2)
+  assert.equal(grid[0].length, 3)
+  assert.equal(grid[1].length, 3) // 等宽归一化
+  assert.equal(grid[0][0], '左侧')
+  assert.equal(grid[1][0], '左侧') // rowspan 覆盖行保留文本
+  assert.equal(grid[1][1], '宽格') // colspan 复制
+  assert.equal(grid[1][2], '宽格')
+})
+
+test('parseMatrixCell：@地点/周次/教师启发式', () => {
+  const a = parseMatrixCell('数据库系统@立园楼301(A-B) 1-16周')
+  assert.equal(a.name, '数据库系统')
+  assert.ok(a.location.includes('立园楼301'))
+  assert.deepEqual(a.weekRule, { type: 'every', weeks: [] })
+  const b = parseMatrixCell('大学体育3 王强 田径场 1-8(单)')
+  assert.equal(b.name, '大学体育3')
+  assert.equal(b.location, '田径场')
+  assert.equal(b.teacher, '王强')
+  assert.deepEqual(b.weekRule, { type: 'odd', weeks: [1, 3, 5, 7] })
+  assert.equal(parseMatrixCell('非本周'), null)
+})
+
+test('parseHtmlMatrix：矩阵课表（含连堂合并与单双周）', () => {
+  const html = `
+  <table>
+    <tr><th>节次</th><th>周一</th><th>周三</th><th>周五</th></tr>
+    <tr><td>1</td><td rowspan="2">大学高数@南104</td><td></td><td></td></tr>
+    <tr><td>2</td><td></td><td></td></tr>
+    <tr><td>3</td><td></td><td>体育3 田径场 1-8(单)</td><td></td></tr>
+  </table>`
+  const list = parseHtmlMatrix(html)
+  assert.ok(list && list.length === 2, `矩阵解析应得 2 门课，实际 ${list && list.length}`)
+  const math = list.find((c) => c.name === '大学高数')
+  assert.ok(math)
+  assert.equal(math.dayOfWeek, 1)
+  assert.equal(math.startSection, 1)
+  assert.equal(math.endSection, 2) // 连堂合并
+  assert.equal(math.location, '南104')
+  const pe = list.find((c) => c.name === '大学体育3' || c.name === '体育3')
+  assert.ok(pe)
+  assert.equal(pe.weekRule.type, 'odd')
+})
+
+test('parseHtmlCourseTable：列式优先、矩阵回退、互不误判', () => {
+  const columnar = `<table><tr><th>课程名称</th><th>星期</th><th>节次</th></tr>
+    <tr><td>线性代数</td><td>周二</td><td>3-4</td></tr></table>`
+  const col = parseHtmlCourseTable(columnar)
+  assert.equal(col.length, 1)
+  assert.equal(col[0].name, '线性代数')
+
+  const matrix = `<table><tr><th>节次</th><th>周一</th><th>周二</th><th>周三</th></tr>
+    <tr><td>1</td><td>英语@外语楼</td><td></td><td></td></tr></table>`
+  const mat = parseHtmlCourseTable(matrix)
+  assert.equal(mat.length, 1)
+  assert.equal(mat[0].name, '英语')
+  assert.equal(parseHtmlCourseTable('<p>没有表格</p>'), null)
+})
+
+test('dedupeAgainst：判重键为名称+星期+节次+周次规则', () => {
+  const existing = [
+    { name: '高数', dayOfWeek: 1, startSection: 1, endSection: 2, weekRule: { type: 'every', weeks: [] } },
+    { name: '体育', dayOfWeek: 3, startSection: 5, endSection: 6, weekRule: { type: 'odd', weeks: [1, 3] } }
+  ]
+  const incoming = [
+    { name: '高数', dayOfWeek: 1, startSection: 1, endSection: 2, weekRule: { type: 'every', weeks: [] } }, // 完全重复
+    { name: '高数', dayOfWeek: 1, startSection: 1, endSection: 2, weekRule: { type: 'odd', weeks: [1, 3] } }, // 周次不同 → 不算重
+    { name: '英语', dayOfWeek: 2, startSection: 3, endSection: 4, weekRule: { type: 'every', weeks: [] } }, // 新课程
+    { name: '英语', dayOfWeek: 2, startSection: 3, endSection: 4, weekRule: { type: 'every', weeks: [] } } // 同批内重复
+  ]
+  const { fresh, duplicates } = dedupeAgainst(existing, incoming)
+  assert.equal(fresh.length, 2)
+  assert.equal(duplicates.length, 2)
+  assert.deepEqual(fresh.map((c) => c.name), ['高数', '英语'])
+  assert.equal(
+    courseKey(existing[1]),
+    courseKey({ ...existing[1], weekRule: { type: 'odd', weeks: [3, 1] } })
+  ) // 周次数组顺序无关
+})
+
+test('防回归：useTasks() 暴露 incrementTaskPomodoros（绑定任务计数依赖）', () => {
+  const api = useTasks()
+  assert.equal(typeof api.incrementTaskPomodoros, 'function')
+  assert.equal(typeof api.addTask, 'function')
+  assert.equal(typeof api.ensureLoaded, 'function')
 })
 
 // ==================== 汇总 ====================

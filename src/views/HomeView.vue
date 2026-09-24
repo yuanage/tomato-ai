@@ -144,14 +144,14 @@ const {
       .catch(() => {
         message.error('记录保存失败，请检查本地存储')
       })
-    // 【联动】绑定任务累加已消耗番茄数（失败仅提示）
+    // 【联动】全局广播：统计页等模块自动刷新（先广播，后续联动异常不阻断）
+    emit('pomodoro:completed', record)
+    // 【联动】绑定任务累加已消耗番茄数（失败仅提示，不影响记录与统计）
     if (selectedTaskId.value) {
       incrementTaskPomodoros(selectedTaskId.value).catch(() => {
         message.error('任务计数更新失败')
       })
     }
-    // 【联动】全局广播：统计页等模块自动刷新
-    emit('pomodoro:completed', record)
   }
 })
 

@@ -147,6 +147,7 @@ export function useTasks() {
     sortedTasks,
     ensureLoaded,
     addTask,
+    incrementTaskPomodoros, // 防回归：专注页绑定任务依赖此方法（曾因未暴露导致计数失效）
     toggleDone,
     togglePin,
     updateTask,

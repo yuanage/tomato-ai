@@ -208,16 +208,23 @@
         </div>
         <div v-if="importPreview" class="import-result">
           <div class="import-count">
-            可导入 {{ importPreview.items.length }} 门课程
-            <span v-if="importPreview.skipped > 0">（跳过无效 {{ importPreview.skipped }} 条）</span>
+            可导入 {{ importPreview.fresh.length }} 门课程
+            <span v-if="importPreview.duplicates.length > 0">（{{ importPreview.duplicates.length }} 门与现有课程重复，将跳过）</span>
+            <span v-if="importPreview.skipped > 0">（忽略无效 {{ importPreview.skipped }} 条）</span>
           </div>
-          <div v-for="(c, i) in importPreview.items.slice(0, 5)" :key="i" class="import-line">
+          <div v-for="(c, i) in importPreview.fresh.slice(0, 5)" :key="i" class="import-line">
             {{ c.name }} · 周{{ '一二三四五六日'[c.dayOfWeek - 1] }} 第{{ c.startSection }}-{{ c.endSection }}节
           </div>
-          <div v-if="importPreview.items.length > 5" class="import-more">
-            另有 {{ importPreview.items.length - 5 }} 门…
+          <div v-if="importPreview.fresh.length > 5" class="import-more">
+            另有 {{ importPreview.fresh.length - 5 }} 门…
           </div>
-          <n-button type="primary" @click="confirmImport">确认导入</n-button>
+          <div v-if="importPreview.duplicates.length" class="field-row">
+            <n-switch v-model:value="importAll" size="small" />
+            <span class="meta-hint">仍导入重复项</span>
+          </div>
+          <n-button type="primary" :disabled="!importPreview.fresh.length && !importAll" @click="confirmImport">
+            确认导入
+          </n-button>
         </div>
       </div>
     </n-modal>
@@ -290,10 +297,11 @@ import {
 } from '../utils/schedule'
 import {
   sniffImport,
-  parseHtmlColumns,
+  parseHtmlCourseTable,
   decodeShare,
   encodeShare,
-  sanitizeImport
+  sanitizeImport,
+  dedupeAgainst
 } from '../utils/importSchedule'
 import { useSchedule } from '../composables/useSchedule'
 
@@ -469,7 +477,8 @@ async function handleDelete() {
 const importShow = ref(false)
 const importText = ref('')
 const importParsing = ref(false)
-const importPreview = ref(null) // { items, skipped }
+const importAll = ref(false) // 仍导入重复项（默认跳过重复）
+const importPreview = ref(null) // { fresh, duplicates, skipped }
 
 function openImport() {
   importShow.value = true
@@ -490,19 +499,21 @@ function previewImport() {
       importPreview.value = null
       return
     }
-    const rawItems = kind === 'share' ? decodeShare(importText.value) : parseHtmlColumns(importText.value)
+    const rawItems = kind === 'share' ? decodeShare(importText.value) : parseHtmlCourseTable(importText.value)
     if (!rawItems || !rawItems.length) {
-      message.error('未解析到课程，请检查粘贴内容')
+      message.error('未解析到课程：请把这段 HTML 发我适配（支持列式与矩阵式课表）')
       importPreview.value = null
       return
     }
-    const valid = sanitizeImport(rawItems, COURSE_COLORS)
+    // 补色（按现有课程数递增，避免全同色）
+    const valid = sanitizeImport(rawItems, COURSE_COLORS, courses.value.length)
     if (!valid.length) {
       message.error('未识别出有效课程（需包含课程名/星期）')
       importPreview.value = null
       return
     }
-    importPreview.value = { items: valid, skipped: rawItems.length - valid.length }
+    const { fresh, duplicates } = dedupeAgainst(courses.value, valid)
+    importPreview.value = { fresh, duplicates, skipped: rawItems.length - valid.length }
   } finally {
     importParsing.value = false
   }
@@ -510,8 +521,16 @@ function previewImport() {
 
 async function confirmImport() {
   if (!importPreview.value) return
+  const items = importAll.value
+    ? [...importPreview.value.fresh, ...importPreview.value.duplicates]
+    : importPreview.value.fresh
+  if (!items.length) {
+    message.info('没有需要导入的课程（全部与现有课程重复）')
+    importShow.value = false
+    return
+  }
   let ok = 0
-  for (const c of importPreview.value.items) {
+  for (const c of items) {
     try {
       await addCourse(c)
       ok++
