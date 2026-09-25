@@ -93,6 +93,42 @@ export function fmtDate(ts) {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
 }
 
+/** 'HH:MM' → 当日分钟数；非法返回 null */
+function toMinutes(s) {
+  const m = String(s ?? '').match(/^(\d{1,2}):(\d{2})$/)
+  if (!m) return null
+  return Number(m[1]) * 60 + Number(m[2])
+}
+
+/**
+ * 当前时刻正在上的课程（P2 联动核心，纯函数）：
+ * 星期匹配 + 当前周次规则命中 + now 落在起止节次的时间区间内。
+ * 命中多门时返回节次开始最早的一门；无则返回 null。
+ */
+export function currentCourseNow(courses, meta, now = Date.now()) {
+  const sections = normalizeSections(meta?.sections)
+  const week = weekNumberFor(now, meta?.semesterStart ?? defaultMeta().semesterStart)
+  const d = new Date(now)
+  const dow = d.getDay() === 0 ? 7 : d.getDay()
+  const minutes = d.getHours() * 60 + d.getMinutes()
+
+  let hit = null
+  for (const c of courses || []) {
+    if (Number(c.dayOfWeek) !== dow) continue
+    if (!courseInWeek(c, week)) continue
+    const s = sections.find((x) => Number(x.index) === Number(c.startSection))
+    const e = sections.find((x) => Number(x.index) === Number(c.endSection))
+    if (!s || !e) continue
+    const startMin = toMinutes(s.start)
+    const endMin = toMinutes(e.end)
+    if (startMin === null || endMin === null) continue
+    if (minutes >= startMin && minutes <= endMin) {
+      if (!hit || Number(c.startSection) < Number(hit.startSection)) hit = c
+    }
+  }
+  return hit
+}
+
 /** 缺省学期元数据：学期起始 = 本周一，共 20 周，显示周末，节次用内置表 */
 export function defaultMeta() {
   return { semesterStart: fmtDate(mondayOf(Date.now())), totalWeeks: 20, showWeekend: true }

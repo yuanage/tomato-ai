@@ -9,6 +9,19 @@
       </TimerRing>
     </div>
 
+    <!-- 【联动】上课时段提示：当前正在上的课程，可一键专注并计入 -->
+    <div v-if="currentCourse" class="course-now">
+      <div class="cn-info">
+        <div class="cn-title">正在上：{{ currentCourse.name }}</div>
+        <div class="cn-meta">
+          {{ currentCourse.location ? '@' + currentCourse.location + ' · ' : '' }}第{{ currentCourse.startSection }}-{{ currentCourse.endSection }}节
+        </div>
+      </div>
+      <n-button size="small" type="primary" :disabled="isRunning" @click="focusThisClass">
+        专注这节课
+      </n-button>
+    </div>
+
     <!-- 绑定任务（可选）：完成的番茄计入该任务 -->
     <n-select
       v-model:value="selectedTaskId"
@@ -93,6 +106,8 @@ import { useMessage } from 'naive-ui'
 import { usePomodoro } from '../composables/usePomodoro'
 import { useSettings } from '../composables/useSettings'
 import { useTasks, pendingFocusTaskId } from '../composables/useTasks'
+import { useSchedule } from '../composables/useSchedule'
+import { currentCourseNow } from '../utils/schedule'
 import { addPomodoroRecord } from '../utils/storage'
 import { on as onEvent, emit } from '../utils/events'
 import TimerRing from '../components/TimerRing.vue'
@@ -114,7 +129,24 @@ function firePulse() {
 onUnmounted(() => clearTimeout(pulseTimer))
 
 const { settings, ensureLoaded: ensureSettingsLoaded, updateSettings } = useSettings()
-const { tasks, ensureLoaded: ensureTasksLoaded, incrementTaskPomodoros } = useTasks()
+const { tasks, ensureLoaded: ensureTasksLoaded, addTask, incrementTaskPomodoros } = useTasks()
+
+// 【联动】课表：上课时段显示当前课程，可一键专注并计入
+const { courses: scheduleCourses, meta: scheduleMeta, ensureLoaded: ensureScheduleLoaded } = useSchedule()
+const nowTick = ref(0)
+let courseTimer = null
+const currentCourse = computed(() => {
+  void nowTick.value // 分钟级刷新依赖
+  void scheduleCourses.value
+  void scheduleMeta.value
+  return currentCourseNow(scheduleCourses.value, scheduleMeta.value, Date.now())
+})
+onMounted(() => {
+  courseTimer = setInterval(() => {
+    nowTick.value = Date.now()
+  }, 60000)
+})
+onUnmounted(() => clearInterval(courseTimer))
 
 // 完成回调：落库 + 轻提示 + 震动（按设置开关）
 const {
@@ -155,6 +187,27 @@ const {
   }
 })
 
+// 【联动】一键专注当前课程：自动建"上课：X"任务并绑定，随即开始计时
+async function focusThisClass() {
+  if (isRunning.value || !currentCourse.value) return
+  try {
+    await ensureTasksLoaded()
+    const title = `上课：${currentCourse.value.name}`
+    const existing = tasks.value.find((t) => !t.done && t.title === title)
+    if (existing) {
+      selectedTaskId.value = existing.id
+    } else {
+      const task = await addTask(title, 1)
+      if (!task) return
+      selectedTaskId.value = task.id
+    }
+    start()
+    message.success(`已绑定「${title}」，专注开始`)
+  } catch {
+    message.error('绑定课程任务失败，请重试')
+  }
+}
+
 // 挂载时：应用设置 + 恢复时长记忆 + 加载任务 + 接收"开始专注"快捷入口
 onMounted(async () => {
   try {
@@ -173,6 +226,11 @@ onMounted(async () => {
     await ensureTasksLoaded()
   } catch {
     /* 任务读取失败：列表为空，可刷新重试 */
+  }
+  try {
+    await ensureScheduleLoaded()
+  } catch {
+    /* 课表读取失败：不显示上课卡片 */
   }
   // 【联动】任务页"▶ 开始专注"快捷入口
   if (pendingFocusTaskId.value) {
@@ -317,5 +375,41 @@ function persistDuration(minutes) {
   align-items: center;
   gap: 14px;
   min-height: 48px;
+}
+
+/* 【联动】上课时段卡片 */
+.course-now {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  max-width: 300px;
+  padding: 10px 12px;
+  border-radius: var(--radius-m);
+  background: var(--primary-container);
+  animation: rise-in var(--motion-normal) var(--ease-standard);
+}
+
+.cn-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.cn-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cn-meta {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 </style>

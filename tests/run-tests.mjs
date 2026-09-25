@@ -27,6 +27,7 @@ import {
   normalizeSections,
   weeksOf,
   findConflicts,
+  currentCourseNow,
   COURSE_COLORS
 } from '../src/utils/schedule'
 import {
@@ -44,6 +45,7 @@ import {
   dedupeAgainst,
   encodeShare,
   decodeShare,
+  decodeShareFull,
   sniffImport,
   sanitizeImport
 } from '../src/utils/importSchedule'
@@ -994,6 +996,73 @@ test('parseHtmlCourseTable：EAMS 页面走专属解析器', () => {
   // 无 EAMS 特征的普通矩阵表不受影响
   const matrix = `<table><tr><th>节次</th><th>周一</th><th>周二</th><th>周三</th></tr><tr><td>1</td><td>英语@外语楼</td><td></td><td></td></tr></table>`
   assert.equal(parseHtmlCourseTable(matrix).length, 1)
+})
+
+// ==================== P2：课程×番茄联动 + TA1 v2 备份 ====================
+section('schedule.js currentCourseNow 联动判定')
+
+// 锚点：2026-09-09 为周三（第 1 周）；默认节次表：第1节 08:00-08:45 …
+const META = { semesterStart: '2026-09-07', totalWeeks: 20, showWeekend: true }
+const COURSES = [
+  { name: '大学高数', dayOfWeek: 3, startSection: 1, endSection: 2, weekRule: { type: 'every', weeks: [] } },
+  { name: '体育3', dayOfWeek: 3, startSection: 5, endSection: 6, weekRule: { type: 'odd', weeks: [] } },
+  { name: '选修课', dayOfWeek: 4, startSection: 9, endSection: 10, weekRule: { type: 'every', weeks: [] } }
+]
+const atTime = (h, m) => new Date(2026, 8, 9, h, m).getTime() // 2026-09-09 周三
+
+test('currentCourseNow：节次时间内命中课程', () => {
+  const c = currentCourseNow(COURSES, META, atTime(8, 20)) // 第 1 节内
+  assert.ok(c)
+  assert.equal(c.name, '大学高数')
+  const c2 = currentCourseNow(COURSES, META, atTime(14, 10)) // 第 5 节 14:00-14:45 内
+  assert.ok(c2)
+  assert.equal(c2.name, '体育3')
+})
+
+test('currentCourseNow：非时段/非当天返回 null，起点时刻命中', () => {
+  assert.equal(currentCourseNow(COURSES, META, atTime(7, 59)), null) // 开课前 1 分钟
+  assert.equal(currentCourseNow(COURSES, META, atTime(8, 0)).name, '大学高数') // 起点即命中
+  assert.equal(currentCourseNow(COURSES, META, atTime(12, 0)), null) // 午休
+  assert.equal(currentCourseNow(COURSES, META, atTime(21, 0)), null) // 晚上无课
+  const thu = new Date(2026, 8, 10, 9, 30).getTime() // 周四第2节，只有第9-10节选修课
+  assert.equal(currentCourseNow(COURSES, META, thu), null)
+})
+
+test('currentCourseNow：单双周不命中', () => {
+  const evenWeek = new Date(2026, 8, 16, 14, 10).getTime() // 09-16 周三 第2周（双周），体育3 是单周
+  assert.equal(currentCourseNow(COURSES, META, evenWeek), null)
+})
+
+test('currentCourseNow：多门命中取节次最早', () => {
+  const list = [
+    ...COURSES,
+    { name: '重叠课', dayOfWeek: 3, startSection: 1, endSection: 2, weekRule: { type: 'every', weeks: [] } }
+  ]
+  const c = currentCourseNow(list, META, atTime(8, 30))
+  assert.equal(c.name, '大学高数') // startSection 相同取先注册者，保持稳定
+})
+
+test('TA1 v2：完整备份口令（含学期设置）往返', () => {
+  const courses = [{ name: '高数', dayOfWeek: 1, startSection: 1, endSection: 2, weekRule: { type: 'every', weeks: [] } }]
+  const meta = { semesterStart: '2026-09-07', totalWeeks: 20, showWeekend: false }
+  const share = encodeShare(courses, meta)
+  const full = decodeShareFull(share)
+  assert.equal(full.courses.length, 1)
+  assert.equal(full.meta.semesterStart, '2026-09-07')
+  assert.equal(full.meta.showWeekend, false)
+  // 兼容旧调用（逐字段断言；解码对象含 color: undefined 键，不做整对象比较）
+  const back = decodeShare(share)
+  assert.equal(back.length, 1)
+  assert.equal(back[0].name, '高数')
+  assert.equal(back[0].dayOfWeek, 1)
+  assert.deepEqual(back[0].weekRule, { type: 'every', weeks: [] })
+})
+
+test('TA1 v1 旧口令兼容：meta 为 null', () => {
+  const old = encodeShare([{ name: '旧课', dayOfWeek: 2, startSection: 3, endSection: 4, weekRule: { type: 'every', weeks: [] } }])
+  const full = decodeShareFull(old)
+  assert.equal(full.meta, null)
+  assert.equal(full.courses[0].name, '旧课')
 })
 
 // ==================== 汇总 ====================

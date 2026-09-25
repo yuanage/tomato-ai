@@ -513,15 +513,18 @@ export function dedupeAgainst(existing, incoming) {
 
 const SHARE_HEADER = 'TA1:'
 
-/** 生成分享口令：TA1:<base64(JSON)>（unicode 安全） */
-export function encodeShare(courses) {
-  const json = JSON.stringify({ v: 1, courses: courses || [] })
-  const b64 = btoa(unescape(encodeURIComponent(json)))
-  return SHARE_HEADER + b64
+/** 生成分享口令：TA1:<base64(JSON)>（unicode 安全）。传 meta 时升级为 v2 完整备份（含学期设置） */
+export function encodeShare(courses, meta = null) {
+  const payload =
+    meta && typeof meta === 'object'
+      ? { v: 2, courses: courses || [], meta }
+      : { v: 1, courses: courses || [] }
+  const json = JSON.stringify(payload)
+  return SHARE_HEADER + btoa(unescape(encodeURIComponent(json)))
 }
 
-/** 解析分享口令 → 课程对象数组；非法返回 null */
-export function decodeShare(text) {
+/** 解析分享口令 → { courses, meta }（v2 含学期设置；v1 旧口令 meta 为 null）；非法返回 null */
+export function decodeShareFull(text) {
   const s = String(text ?? '').trim()
   if (!s.startsWith(SHARE_HEADER)) return null
   try {
@@ -529,7 +532,7 @@ export function decodeShare(text) {
     const data = JSON.parse(json)
     const list = Array.isArray(data?.courses) ? data.courses : null
     if (!list || !list.length) return null
-    return list.map((c) => ({
+    const courses = list.map((c) => ({
       name: String(c.name || '').trim(),
       location: String(c.location || ''),
       teacher: String(c.teacher || ''),
@@ -539,9 +542,18 @@ export function decodeShare(text) {
       weekRule: c?.weekRule || { type: 'every', weeks: [] },
       color: typeof c.color === 'string' ? c.color : undefined
     }))
+    const meta =
+      data?.v === 2 && data.meta && typeof data.meta === 'object' ? data.meta : null
+    return { courses, meta }
   } catch {
     return null
   }
+}
+
+/** 解析分享口令 → 课程对象数组；非法返回 null（兼容旧调用） */
+export function decodeShare(text) {
+  const r = decodeShareFull(text)
+  return r ? r.courses : null
 }
 
 /** 导入入口嗅探：HTML 表格 / 分享口令 / 无法识别 */

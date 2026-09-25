@@ -298,7 +298,7 @@ import {
 import {
   sniffImport,
   parseHtmlCourseTable,
-  decodeShare,
+  decodeShareFull,
   encodeShare,
   sanitizeImport,
   dedupeAgainst
@@ -490,7 +490,7 @@ function clearImportText() {
   importPreview.value = null
 }
 
-function previewImport() {
+async function previewImport() {
   importParsing.value = true
   try {
     const kind = sniffImport(importText.value)
@@ -499,11 +499,22 @@ function previewImport() {
       importPreview.value = null
       return
     }
-    const rawItems = kind === 'share' ? decodeShare(importText.value) : parseHtmlCourseTable(importText.value)
+    const rawItems = kind === 'share' ? decodeShareFull(importText.value)?.courses ?? null : parseHtmlCourseTable(importText.value)
     if (!rawItems || !rawItems.length) {
       message.error('未解析到课程：请把这段 HTML 发我适配（支持列式与矩阵式课表）')
       importPreview.value = null
       return
+    }
+    // v2 完整备份口令：同步应用学期设置
+    const shareMeta = kind === 'share' ? decodeShareFull(importText.value)?.meta ?? null : null
+    if (shareMeta && typeof shareMeta.semesterStart === 'string') {
+      await updateMeta({
+        semesterStart: shareMeta.semesterStart,
+        totalWeeks: Number(shareMeta.totalWeeks) || meta.value.totalWeeks,
+        showWeekend: shareMeta.showWeekend !== false,
+        ...(Array.isArray(shareMeta.sections) && shareMeta.sections.length ? { sections: shareMeta.sections } : {})
+      })
+      message.info('学期设置已随口令同步（起始日/总周数/节次表）')
     }
     // 补色（按现有课程数递增，避免全同色）
     const valid = sanitizeImport(rawItems, COURSE_COLORS, courses.value.length)
@@ -546,12 +557,12 @@ async function confirmImport() {
 
 async function genShare() {
   try {
-    const share = encodeShare(courses.value)
+    const share = encodeShare(courses.value, meta.value) // v2 完整备份：含学期设置
     await navigator.clipboard.writeText(share)
-    message.success('分享口令已复制，发送给同学粘贴导入即可')
+    message.success('完整备份口令已复制（含学期设置），发送给同学粘贴导入即可')
   } catch {
     importShow.value = true
-    importText.value = encodeShare(courses.value)
+    importText.value = encodeShare(courses.value, meta.value)
     message.error('自动复制失败，口令已填入输入框，请手动复制')
   }
 }
