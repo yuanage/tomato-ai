@@ -23,7 +23,10 @@ src-tauri/target/
 
 # 日志
 *.log
+<<<<<<< HEAD
 
 # Python 缓存
 __pycache__/
 *.pyc
+=======
+>>>>>>> origin/main
